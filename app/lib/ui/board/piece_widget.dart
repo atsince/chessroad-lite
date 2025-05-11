@@ -52,7 +52,7 @@ class PieceWidget extends StatelessWidget {
             color: bgColor,
             border: Border.all(
               color: borderColor,
-              width: squreSide - diameter + 2,
+              width: squreSide - diameter +2,
             ),
             boxShadow: const [
               BoxShadow(

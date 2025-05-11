@@ -366,14 +366,13 @@ class BattlePageState extends State<BattlePage>
   }
 
   engineCallback(EngineResponse er) async {
-    //
     final resp = er.response;
 
     if (resp is EngineInfo) {
-      //
+      // 处理引擎思考信息，更新UI显示
       _boardState.engineInfo = resp;
 
-      // scoreType 0 - cp, 1 - mate
+      // 检查是否找到必胜着法等情况
       final scoreType = _boardState.engineInfo!.tokens['cp_or_mate'];
       final depth = _boardState.engineInfo!.tokens['depth'];
 
@@ -381,55 +380,54 @@ class BattlePageState extends State<BattlePage>
         PikafishEngine().stop(removeCallback: false);
       }
 
+      // 更新界面显示的评分
       if (PikafishEngine().state != EngineState.pondering) {
         final score = _boardState.engineInfo!.score(_boardState, false);
         if (score != null) _pageState.changeStatus(score);
       }
-    } else {
-      //
-      if (resp is Bestmove) {
-        //
-        final move = Move.fromEngineMove(resp.bestmove);
+    } else if (resp is Bestmove) {
+      // 处理最佳着法，执行AI走棋
+      final move = Move.fromEngineMove(resp.bestmove);
+      _boardState.bestmove = (er.response as Bestmove);
 
-        _boardState.bestmove = (er.response as Bestmove);
+      // 执行移动并播放动画
+      _boardState.move(move);
+      startPieceAnimation();
 
-        _boardState.move(move);
-        startPieceAnimation();
+      // 检查游戏结果
+      final result = HybridEngine().scanGameResult(
+        _boardState.position,
+        _boardState.playerSide,
+      );
 
-        final result = HybridEngine().scanGameResult(
-          _boardState.position,
-          _boardState.playerSide,
-        );
-
-        switch (result) {
-          //
-          case GameResult.pending:
-            if (er.type == EngineType.cloudLibrary) {
-              _pageState.changeStatus(BattlePage.yourTurn);
-            } else {
-              afterEngineMove();
-            }
-            break;
-          case GameResult.win:
-            gotWin();
-            break;
-          case GameResult.lose:
-            gotLose();
-            break;
-          case GameResult.draw:
-            gotDraw();
-            break;
-        }
-      } else if (resp is NoBestmove) {
-        if (PikafishEngine().state == EngineState.searching) {
+      // 处理游戏结果
+      switch (result) {
+        case GameResult.pending:
+          if (er.type == EngineType.cloudLibrary) {
+            _pageState.changeStatus(BattlePage.yourTurn);
+          } else {
+            afterEngineMove();
+          }
+          break;
+        case GameResult.win:
           gotWin();
-        } else {
+          break;
+        case GameResult.lose:
           gotLose();
-        }
-      } else if (resp is Error) {
-        showSnackBar(resp.message);
-        _pageState.changeStatus(resp.message);
+          break;
+        case GameResult.draw:
+          gotDraw();
+          break;
       }
+    } else if (resp is NoBestmove) {
+      if (PikafishEngine().state == EngineState.searching) {
+        gotWin();
+      } else {
+        gotLose();
+      }
+    } else if (resp is Error) {
+      showSnackBar(resp.message);
+      _pageState.changeStatus(resp.message);
     }
   }
 
