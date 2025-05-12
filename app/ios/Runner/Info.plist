@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>棋路Lite</string>
+	<string>象棋课堂</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -15,7 +15,7 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>棋路Lite</string>
+	<string>chessroad</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -33,8 +33,10 @@
 	</dict>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>The app don&apos;t use microphone, but just_audio sdk need.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>需要访问相机以拍摄棋盘图片进行识别</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>棋路将请求将精彩局面保存手机相册</string>
+	<string>需要访问相册以选择棋盘图片进行识别</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UIFileSharingEnabled</key>

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:chessroad/config/local_data.dart';
 import 'package:chessroad/engine/hybrid_engine.dart';
+import 'package:chessroad/routes/board_recognition/board_recognition_page.dart';
 import 'package:chessroad/routes/main_menu/privacy_policy.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
@@ -187,6 +188,18 @@ class MainMenuState extends State<MainMenu>
                 style: menuItemStyle,
               ),
               onPressed: () => navigateTo(GameScene.gameNotation),
+            ),
+            const Expanded(child: SizedBox()),
+            TextButton(
+              child: Text(
+                '棋盘识别',
+                style: menuItemStyle,
+              ),
+              onPressed: () => Navigator.of(context).push(
+                CupertinoPageRoute(
+                  builder: (context) => const BoardRecognitionPage(),
+                ),
+              ),
             ),
             const Expanded(child: SizedBox()),
             TextButton(
