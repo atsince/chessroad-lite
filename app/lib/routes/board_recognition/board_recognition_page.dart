@@ -18,6 +18,7 @@ import '../../ui/build_utils.dart';
 import '../../ui/snack_bar.dart';
 import '../../engine/hybrid_engine.dart';
 import '../../engine/engine.dart';
+import '../../config/local_data.dart';
 
 class BoardRecognitionPage extends StatefulWidget {
   const BoardRecognitionPage({Key? key}) : super(key: key);
@@ -47,6 +48,9 @@ class _BoardRecognitionPageState extends State<BoardRecognitionPage> {
 
   // 添加日志存储
   List<String> _logs = [];
+
+  // 存储引擎分析的走法数组
+  List<Move> _engineMoves = [];
 
   @override
   void initState() {
@@ -143,6 +147,20 @@ class _BoardRecognitionPageState extends State<BoardRecognitionPage> {
       _updateFenSideToMove();
       _loadFenToBoard(showSnackbar: false);
       _addLog("已切换走棋方为: ${_isRedSideToMove ? '红方' : '黑方'}");
+
+      // 切换走棋方后清空引擎走法并重新请求引擎提示
+      setState(() {
+        _engineMoves = [];
+      });
+
+      // 手动清除棋盘上的提示箭头
+      final boardState = Provider.of<BoardState>(context, listen: false);
+      boardState.engineInfo = null;
+      boardState.bestmove = null;
+      boardState.notifyListeners();
+
+      // 请求新的走棋提示
+      _requestEngineHint();
     }
   }
 
@@ -297,6 +315,7 @@ class _BoardRecognitionPageState extends State<BoardRecognitionPage> {
     setState(() {
       _isEngineThinking = true;
       _engineHint = null;
+      _engineMoves = []; // 清空之前的走法
     });
 
     _addLog('请求引擎提示，走棋方: ${_isRedSideToMove ? '红方' : '黑方'}');
@@ -312,6 +331,7 @@ class _BoardRecognitionPageState extends State<BoardRecognitionPage> {
         return;
       }
 
+      // 设置引擎预先思考几步
       await HybridEngine().go(position, _engineCallback);
     } catch (e) {
       _addLog('请求引擎提示时出错: $e');
@@ -319,6 +339,44 @@ class _BoardRecognitionPageState extends State<BoardRecognitionPage> {
         _isEngineThinking = false;
       });
       showSnackBar('引擎分析出错: $e');
+    }
+  }
+
+  // 设置走棋提示显示方法
+  void _setupEngineMovesToDisplay(BoardState boardState, List<Move> moves) {
+    if (moves.isEmpty) return;
+
+    try {
+      // 创建一个临时位置，检查走法是否有效
+      final position = Fen.positionFromFen(_fen!);
+      if (position == null) return;
+
+      // 创建一个新的EngineInfo以显示思考线路
+      final allMoves = moves.map((m) => m.asEngineMove()).toList();
+      final stringPV = allMoves.join(' ');
+      _addLog('创建引擎信息 PV: $stringPV');
+
+      // 创建引擎信息对象
+      final engineInfo = EngineInfo.parse('info depth 20 seldepth 30 multipv 1 score cp 50 nodes 10000 nps 5000 hashfull 0 tbhits 0 time 2000 pv $stringPV');
+
+      // 设置引擎信息，确保pvs包含所有走法
+      boardState.engineInfo = engineInfo;
+
+      // 设置bestmove，但将其设为空，强制使用pvs中的走法
+      if (moves.length >= 1) {
+        _addLog('设置最佳走法: ${moves[0].asEngineMove()}');
+
+        // 注意：我们不设置bestmove，这样ThinkingBoardLayout会走第二个分支，使用engineInfo中的pvs
+        // boardState.bestmove = Bestmove(moves[0].asEngineMove());
+
+        // 清除任何现有的bestmove，确保使用engineInfo中的走法
+        boardState.bestmove = null;
+      }
+
+      // 确保更新UI
+      boardState.notifyListeners();
+    } catch (e) {
+      _addLog('设置走棋提示显示出错: $e');
     }
   }
 
@@ -339,12 +397,60 @@ class _BoardRecognitionPageState extends State<BoardRecognitionPage> {
 
         _addLog('引擎评分: $score ($judgement), 深度: $depth');
       }
+
+      // 保存引擎分析的走法路线，最多2步
+      var pvs = resp.pvs;
+      if (pvs.isNotEmpty) {
+        setState(() {
+          _engineMoves = [];
+          int count = 0;
+          for (final moveStr in pvs) {
+            if (count >= 2) break;
+            try {
+              _engineMoves.add(Move.fromEngineMove(moveStr));
+              count++;
+            } catch (e) {
+              _addLog('解析走法时出错: $e');
+            }
+          }
+        });
+
+        // 更新棋盘显示
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            final boardState = Provider.of<BoardState>(context, listen: false);
+            _setupEngineMovesToDisplay(boardState, _engineMoves);
+          }
+        });
+      }
     } else if (resp is Bestmove) {
       _addLog('引擎最佳着法: ${resp.bestmove}');
 
       if (resp.bestmove != null) {
         try {
           final move = Move.fromEngineMove(resp.bestmove);
+
+          // 创建当前和后续走法的列表
+          List<Move> newMoves = [move];
+          if (resp.ponder != null) {
+            try {
+              newMoves.add(Move.fromEngineMove(resp.ponder!));
+              _addLog('添加后续走法: ${resp.ponder}');
+            } catch (e) {
+              _addLog('解析后续走法时出错: $e');
+            }
+          }
+
+          setState(() {
+            _engineMoves = newMoves;
+            _isEngineThinking = false;
+          });
+
+          // 立即更新棋盘显示
+          if (mounted) {
+            final boardState = Provider.of<BoardState>(context, listen: false);
+            _setupEngineMovesToDisplay(boardState, newMoves);
+          }
 
           // 尝试生成中文着法描述
           final position = Fen.positionFromFen(_fen!);
@@ -354,13 +460,11 @@ class _BoardRecognitionPageState extends State<BoardRecognitionPage> {
 
             setState(() {
               _engineHint = moveName;
-              _isEngineThinking = false;
             });
             _addLog('引擎建议: $moveName');
           } else {
             setState(() {
               _engineHint = resp.bestmove;
-              _isEngineThinking = false;
             });
           }
         } catch (e) {
@@ -426,6 +530,7 @@ class _BoardRecognitionPageState extends State<BoardRecognitionPage> {
     setState(() {
       _fen = _testFen;
       _engineHint = null; // 清除之前的引擎提示
+      _engineMoves = []; // 清空之前的走法
     });
 
     // 更新走棋方
@@ -435,12 +540,24 @@ class _BoardRecognitionPageState extends State<BoardRecognitionPage> {
     _loadFenToBoard(showSnackbar: false);
     showSnackBar('已加载测试棋盘');
 
+    // 清除棋盘上的提示箭头
+    final boardState = Provider.of<BoardState>(context, listen: false);
+    boardState.engineInfo = null;
+    boardState.bestmove = null;
+    boardState.notifyListeners();
+
     // 请求引擎提示
     _requestEngineHint();
   }
 
   @override
   Widget build(BuildContext context) {
+    // 首先预初始化BoardState，但不在build周期内设置走法
+    final boardState = Provider.of<BoardState>(context, listen: false);
+
+    // 确保引擎思考箭头功能开启
+    LocalData().thinkingArrowEnabled.value = true;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('棋盘识别'),
@@ -681,16 +798,12 @@ class _BoardRecognitionPageState extends State<BoardRecognitionPage> {
 
             // 显示棋盘
             if (_fen != null)
-              Consumer<BoardState>(
-                builder: (context, boardState, child) {
-                  return Column(
-                    children: [
-                      const Text('预览', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 10),
-                      createChessBoard(context, GameScene.battle),
-                    ],
-                  );
-                },
+              Column(
+                children: [
+                  const Text('预览', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 10),
+                  createChessBoard(context, GameScene.battle),
+                ],
               ),
 
             const SizedBox(height: 30),
