@@ -8,12 +8,16 @@ import 'package:provider/provider.dart';
 import 'package:http/http.dart' as http;
 
 import '../../cchess/cc_fen.dart';
+import '../../cchess/cc_base.dart';
+import '../../cchess/move_name.dart';
 import '../../game/board_state.dart';
 import '../../game/page_state.dart';
 import '../../game/game.dart';
 import '../../services/board_recognition_service.dart';
 import '../../ui/build_utils.dart';
 import '../../ui/snack_bar.dart';
+import '../../engine/hybrid_engine.dart';
+import '../../engine/engine.dart';
 
 class BoardRecognitionPage extends StatefulWidget {
   const BoardRecognitionPage({Key? key}) : super(key: key);
@@ -26,10 +30,17 @@ class _BoardRecognitionPageState extends State<BoardRecognitionPage> {
   File? _image;
   bool _isLoading = false;
   String? _fen;
-  String _apiUrl = "http://49.233.44.201:39010/api/chess/detect";
+  String _apiUrl = "http://49.233.44.201:39009/api/chess/detect";
   final TextEditingController _apiController = TextEditingController(
-    text: "http://49.233.44.201:39010/api/chess/detect",
+    text: "http://49.233.44.201:39009/api/chess/detect",
   );
+
+  // 添加走棋方控制
+  bool _isRedSideToMove = true;
+
+  // 添加引擎提示结果
+  String? _engineHint;
+  bool _isEngineThinking = false;
 
   // 添加默认测试FEN串
   static const String _testFen = "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1";
@@ -101,6 +112,7 @@ class _BoardRecognitionPageState extends State<BoardRecognitionPage> {
       setState(() {
         _image = File(image.path);
         _fen = null; // 清除之前的FEN结果
+        _engineHint = null; // 清除之前的引擎提示
       });
       _addLog("选择了图片: ${image.path}");
     }
@@ -114,8 +126,35 @@ class _BoardRecognitionPageState extends State<BoardRecognitionPage> {
       setState(() {
         _image = File(image.path);
         _fen = null; // 清除之前的FEN结果
+        _engineHint = null; // 清除之前的引擎提示
       });
       _addLog("拍摄了照片: ${image.path}");
+    }
+  }
+
+  // 切换走棋方
+  void _toggleSideToMove() {
+    setState(() {
+      _isRedSideToMove = !_isRedSideToMove;
+      _engineHint = null; // 清除之前的引擎提示
+    });
+
+    if (_fen != null) {
+      _updateFenSideToMove();
+      _loadFenToBoard(showSnackbar: false);
+      _addLog("已切换走棋方为: ${_isRedSideToMove ? '红方' : '黑方'}");
+    }
+  }
+
+  // 更新FEN字符串中的走棋方
+  void _updateFenSideToMove() {
+    if (_fen == null) return;
+
+    final parts = _fen!.split(' ');
+    if (parts.length >= 2) {
+      parts[1] = _isRedSideToMove ? PieceColor.red : PieceColor.black;
+      _fen = parts.join(' ');
+      _addLog("更新FEN走棋方为: ${_isRedSideToMove ? '红方' : '黑方'} ($_fen)");
     }
   }
 
@@ -127,6 +166,7 @@ class _BoardRecognitionPageState extends State<BoardRecognitionPage> {
 
     setState(() {
       _isLoading = true;
+      _engineHint = null; // 清除之前的引擎提示
     });
 
     _addLog('开始上传图片: ${_image!.path}');
@@ -180,8 +220,26 @@ class _BoardRecognitionPageState extends State<BoardRecognitionPage> {
           final fenParts = result.fen!.split(' ');
           if (fenParts.length >= 4) {
             _addLog('FEN格式有效，包含 ${fenParts.length} 个部分');
+
+            // 设置FEN并根据当前选择的走棋方更新
+            setState(() {
+              _fen = result.fen;
+            });
+
+            // 更新走棋方
+            _updateFenSideToMove();
+
+            // 自动加载到棋盘
+            _loadFenToBoard(showSnackbar: false);
+
+            // 自动请求引擎提示
+            _requestEngineHint();
+
           } else {
             _addLog('警告: FEN格式可能不完整，只有 ${fenParts.length} 个部分，标准FEN应至少有4个部分');
+            setState(() {
+              _fen = result.fen;
+            });
           }
         }
       }
@@ -191,9 +249,6 @@ class _BoardRecognitionPageState extends State<BoardRecognitionPage> {
       });
 
       if (result.success) {
-        setState(() {
-          _fen = result.fen;
-        });
         showSnackBar('识别成功: ${result.timeMs}毫秒');
       } else {
         showSnackBar('识别失败: ${result.message}');
@@ -214,9 +269,9 @@ class _BoardRecognitionPageState extends State<BoardRecognitionPage> {
     }
   }
 
-  void _loadFenToBoard() {
+  void _loadFenToBoard({bool showSnackbar = true}) {
     if (_fen == null || _fen!.isEmpty) {
-      showSnackBar('没有有效的FEN字符串');
+      if (showSnackbar) showSnackBar('没有有效的FEN字符串');
       return;
     }
 
@@ -225,10 +280,106 @@ class _BoardRecognitionPageState extends State<BoardRecognitionPage> {
 
     if (success) {
       _addLog('成功加载FEN到棋盘: $_fen');
-      showSnackBar('棋盘已加载');
+      if (showSnackbar) showSnackBar('棋盘已加载');
     } else {
       _addLog('加载FEN到棋盘失败: $_fen');
-      showSnackBar('加载棋盘失败，FEN格式可能不正确');
+      if (showSnackbar) showSnackBar('加载棋盘失败，FEN格式可能不正确');
+    }
+  }
+
+  // 请求引擎提示
+  Future<void> _requestEngineHint() async {
+    if (_fen == null || _fen!.isEmpty) {
+      showSnackBar('没有有效的FEN字符串');
+      return;
+    }
+
+    setState(() {
+      _isEngineThinking = true;
+      _engineHint = null;
+    });
+
+    _addLog('请求引擎提示，走棋方: ${_isRedSideToMove ? '红方' : '黑方'}');
+
+    try {
+      final position = Fen.positionFromFen(_fen!);
+      if (position == null) {
+        _addLog('无法从FEN创建棋局位置');
+        setState(() {
+          _isEngineThinking = false;
+        });
+        showSnackBar('无法解析FEN字符串');
+        return;
+      }
+
+      await HybridEngine().go(position, _engineCallback);
+    } catch (e) {
+      _addLog('请求引擎提示时出错: $e');
+      setState(() {
+        _isEngineThinking = false;
+      });
+      showSnackBar('引擎分析出错: $e');
+    }
+  }
+
+  // 引擎回调函数
+  void _engineCallback(EngineResponse er) {
+    final resp = er.response;
+
+    if (resp is EngineInfo) {
+      _addLog('引擎思考信息: ${resp.tokens}');
+      final score = resp.tokens['score'];
+      final depth = resp.tokens['depth'];
+      final cpOrMate = resp.tokens['cp_or_mate'];
+
+      if (score != null && depth != null) {
+        final judgement = cpOrMate == 1
+          ? (score > 0 ? "$score 步成杀" : "${-score} 步被杀")
+          : (score == 0 ? "均势" : (score > 0 ? "优势" : "劣势"));
+
+        _addLog('引擎评分: $score ($judgement), 深度: $depth');
+      }
+    } else if (resp is Bestmove) {
+      _addLog('引擎最佳着法: ${resp.bestmove}');
+
+      if (resp.bestmove != null) {
+        try {
+          final move = Move.fromEngineMove(resp.bestmove);
+
+          // 尝试生成中文着法描述
+          final position = Fen.positionFromFen(_fen!);
+          if (position != null) {
+            // 要在position上实际走一下这个着法，这样MoveName.translate才能正确生成着法名称
+            final moveName = "${MoveName.translate(position, move)} (${resp.bestmove})";
+
+            setState(() {
+              _engineHint = moveName;
+              _isEngineThinking = false;
+            });
+            _addLog('引擎建议: $moveName');
+          } else {
+            setState(() {
+              _engineHint = resp.bestmove;
+              _isEngineThinking = false;
+            });
+          }
+        } catch (e) {
+          _addLog('解析引擎着法时出错: $e');
+          setState(() {
+            _engineHint = resp.bestmove;
+            _isEngineThinking = false;
+          });
+        }
+      } else {
+        setState(() {
+          _isEngineThinking = false;
+        });
+      }
+    } else if (resp is Error) {
+      _addLog('引擎返回错误: ${resp.message}');
+      setState(() {
+        _isEngineThinking = false;
+      });
     }
   }
 
@@ -274,18 +425,18 @@ class _BoardRecognitionPageState extends State<BoardRecognitionPage> {
     _addLog('加载测试FEN串: $_testFen');
     setState(() {
       _fen = _testFen;
+      _engineHint = null; // 清除之前的引擎提示
     });
 
-    final BoardState boardState = Provider.of<BoardState>(context, listen: false);
-    final success = boardState.load(_testFen, notify: true);
+    // 更新走棋方
+    _updateFenSideToMove();
 
-    if (success) {
-      _addLog('成功加载测试FEN到棋盘');
-      showSnackBar('已加载测试棋盘');
-    } else {
-      _addLog('加载测试FEN到棋盘失败');
-      showSnackBar('加载测试棋盘失败');
-    }
+    // 加载到棋盘
+    _loadFenToBoard(showSnackbar: false);
+    showSnackBar('已加载测试棋盘');
+
+    // 请求引擎提示
+    _requestEngineHint();
   }
 
   @override
@@ -377,11 +528,25 @@ class _BoardRecognitionPageState extends State<BoardRecognitionPage> {
 
             const SizedBox(height: 10),
 
-            // 添加测试FEN按钮
-            OutlinedButton.icon(
-              onPressed: _loadTestFen,
-              icon: const Icon(Icons.dashboard),
-              label: const Text('加载测试棋盘'),
+            // 添加棋盘走棋方切换和测试棋盘按钮
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: _loadTestFen,
+                  icon: const Icon(Icons.dashboard),
+                  label: const Text('加载测试棋盘'),
+                ),
+                const SizedBox(width: 16),
+                ElevatedButton.icon(
+                  onPressed: _toggleSideToMove,
+                  icon: Icon(_isRedSideToMove ? Icons.arrow_upward : Icons.arrow_downward),
+                  label: Text('${_isRedSideToMove ? '红方' : '黑方'}走棋'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _isRedSideToMove ? Colors.red[700] : Colors.grey[800],
+                  ),
+                ),
+              ],
             ),
 
             const SizedBox(height: 20),
@@ -420,6 +585,72 @@ class _BoardRecognitionPageState extends State<BoardRecognitionPage> {
 
             const SizedBox(height: 20),
 
+            // 显示引擎提示
+            if (_fen != null)
+              Container(
+                width: MediaQuery.of(context).size.width * 0.9,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.grey),
+                  borderRadius: BorderRadius.circular(5),
+                  color: Colors.grey[100],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          '${_isRedSideToMove ? '红方' : '黑方'}走棋提示:',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: _isRedSideToMove ? Colors.red[700] : Colors.grey[800],
+                          )
+                        ),
+                        ElevatedButton.icon(
+                          onPressed: _isEngineThinking ? null : _requestEngineHint,
+                          icon: _isEngineThinking
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : const Icon(Icons.flash_on, size: 16),
+                          label: const Text('走棋提示'),
+                          style: ElevatedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 5),
+                    _isEngineThinking
+                      ? const Center(
+                          child: Padding(
+                            padding: EdgeInsets.all(8.0),
+                            child: Text('引擎思考中...'),
+                          ),
+                        )
+                      : _engineHint != null
+                        ? Text(
+                            _engineHint!,
+                            style: TextStyle(
+                              fontFamily: 'monospace',
+                              fontSize: 16,
+                              color: _isRedSideToMove ? Colors.red[800] : Colors.black,
+                            ),
+                          )
+                        : const Text('点击"走棋提示"获取建议'),
+                  ],
+                ),
+              ),
+
+            const SizedBox(height: 10),
+
             // 显示FEN字符串
             if (_fen != null)
               Container(
@@ -438,7 +669,7 @@ class _BoardRecognitionPageState extends State<BoardRecognitionPage> {
                     const SizedBox(height: 10),
                     Center(
                       child: ElevatedButton(
-                        onPressed: _loadFenToBoard,
+                        onPressed: () => _loadFenToBoard(),
                         child: const Text('加载到棋盘'),
                       ),
                     ),
