@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:chessroad/engine/hybrid_engine.dart';
+import 'package:chessroad/overlay/floating_overlay.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_easyloading/flutter_easyloading.dart';
@@ -29,6 +30,18 @@ void main() async {
   if (Platform.isIOS) {
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.leanBack, overlays: []);
   }
+}
+
+// Overlay entry point
+@pragma("vm:entry-point")
+void overlayMain() {
+  runApp(const MaterialApp(
+    debugShowCheckedModeBanner: false,
+    home: Material(
+      color: Colors.transparent,
+      child: FloatingOverlay(),
+    ),
+  ));
 }
 
 class ChessRoadApp extends StatefulWidget {

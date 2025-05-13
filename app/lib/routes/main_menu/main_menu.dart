@@ -4,6 +4,7 @@ import 'package:chessroad/config/local_data.dart';
 import 'package:chessroad/engine/hybrid_engine.dart';
 import 'package:chessroad/routes/board_recognition/board_recognition_page.dart';
 import 'package:chessroad/routes/main_menu/privacy_policy.dart';
+import 'package:chessroad/services/overlay_service.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
@@ -174,22 +175,22 @@ class MainMenuState extends State<MainMenu>
         flex: 4,
         child: Column(
           children: [
-            TextButton(
-              child: Text(
-                '人机练习',
-                style: menuItemStyle,
-              ),
-              onPressed: () => navigateTo(GameScene.battle),
-            ),
-            const Expanded(child: SizedBox()),
-            TextButton(
-              child: Text(
-                '我的对局',
-                style: menuItemStyle,
-              ),
-              onPressed: () => navigateTo(GameScene.gameNotation),
-            ),
-            const Expanded(child: SizedBox()),
+            // TextButton(
+            //   child: Text(
+            //     '人机练习',
+            //     style: menuItemStyle,
+            //   ),
+            //   onPressed: () => navigateTo(GameScene.battle),
+            // ),
+            // const Expanded(child: SizedBox()),
+            // TextButton(
+            //   child: Text(
+            //     '我的对局',
+            //     style: menuItemStyle,
+            //   ),
+            //   onPressed: () => navigateTo(GameScene.gameNotation),
+            // ),
+            // const Expanded(child: SizedBox()),
             TextButton(
               child: Text(
                 '棋盘识别',
@@ -205,6 +206,21 @@ class MainMenuState extends State<MainMenu>
             TextButton(
               onPressed: () => showReadme(context),
               child: Text('版本说明', style: menuItemStyle),
+            ),
+            const Expanded(child: SizedBox()),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                TextButton(
+                  onPressed: _toggleOverlay,
+                  child: Text('悬浮窗口', style: menuItemStyle),
+                ),
+                if (_isOverlayShown)
+                  TextButton(
+                    onPressed: _changeOverlayColor,
+                    child: Text('改变颜色', style: menuItemStyle),
+                  ),
+              ],
             ),
             const Expanded(flex: 4, child: SizedBox()),
           ],
@@ -299,6 +315,26 @@ class MainMenuState extends State<MainMenu>
     _inController.reset();
     _shadowController.reset();
     _inController.forward();
+  }
+
+  bool _isOverlayShown = false;
+
+  void _toggleOverlay() async {
+    OverlayService service = OverlayService();
+
+    if (_isOverlayShown) {
+      await service.closeOverlay();
+      _isOverlayShown = false;
+    } else {
+      await service.showOverlay();
+      _isOverlayShown = true;
+    }
+  }
+
+  void _changeOverlayColor() async {
+    if (_isOverlayShown) {
+      await OverlayService().changeOverlayColor();
+    }
   }
 
   @override
