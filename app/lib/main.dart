@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_easyloading/flutter_easyloading.dart';
 import 'package:provider/provider.dart';
-import 'package:wakelock/wakelock.dart';
+// import 'package:wakelock/wakelock.dart';
 
 import 'game/board_state.dart';
 import 'game/page_state.dart';
@@ -51,7 +51,7 @@ class ChessRoadAppState extends State<ChessRoadApp>
     super.initState();
 
     WidgetsBinding.instance.addObserver(this);
-    Wakelock.enable();
+    // Wakelock.enable();
   }
 
   @override
@@ -79,7 +79,7 @@ class ChessRoadAppState extends State<ChessRoadApp>
 
     switch (state) {
       case AppLifecycleState.resumed:
-        Wakelock.enable();
+        // Wakelock.enable();
         Audios.loopBgm();
         break;
       case AppLifecycleState.inactive:
@@ -87,11 +87,11 @@ class ChessRoadAppState extends State<ChessRoadApp>
       case AppLifecycleState.paused:
         Audios.stopBgm();
         HybridEngine().stop();
-        Wakelock.disable();
+        // Wakelock.disable();
         break;
       case AppLifecycleState.detached:
         Audios.release();
-        Wakelock.disable();
+        // Wakelock.disable();
         HybridEngine().shutdown();
         break;
     }
