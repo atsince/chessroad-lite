@@ -23,6 +23,7 @@ class LocalData {
   factory LocalData() => _instance;
 
   Future<void> load() async {
+    print('Kevin22222');
     //
     _profile = await Profile.local().load();
     // 在分离远程数据和本地数据之前，所有的数据都存在 shared 文件里面
@@ -42,6 +43,8 @@ class LocalData {
     bgmEnabled = DataItem(_profile, 'bgm_enabled', false);
     toneEnabled = DataItem(_profile, 'tone_enabled', true);
     highContrast = DataItem(_profile, 'high_contrast', false);
+
+    print('Kevin333');
   }
 
   Future<bool> save() => _profile.save();

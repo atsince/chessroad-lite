@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:chessroad/config/local_data.dart';
+import 'package:chessroad/debug/debug_routes.dart';
 import 'package:chessroad/engine/hybrid_engine.dart';
 import 'package:chessroad/routes/board_recognition/board_recognition_page.dart';
 import 'package:chessroad/routes/main_menu/privacy_policy.dart';
@@ -33,6 +34,13 @@ class MainMenuState extends State<MainMenu>
   late Animation _inAnimation, _shadowAnimation;
 
   bool _waitingInit = true;
+  bool _debugMode = true; // 调试模式开关
+  int _debugTapCount = 0; // 用于激活调试模式的点击计数器
+  Timer? _debugTapTimer; // 用于重置点击计数的定时器
+  StreamSubscription? _overlayDataSubscription; // 悬浮窗数据订阅
+  String? _lastRecognizedFen; // 最近识别的FEN
+  String? _lastEngineHint; // 最近的引擎提示
+  DateTime? _lastUpdateTime; // 最后更新时间
 
   @override
   void initState() {
@@ -41,6 +49,7 @@ class MainMenuState extends State<MainMenu>
 
     initSync();
     initAsync();
+    _setupOverlayListener();
   }
 
   void initSync() {
@@ -139,6 +148,113 @@ class MainMenuState extends State<MainMenu>
     return result;
   }
 
+  // 处理标题点击，用于激活调试模式
+  void _handleTitleTap() {
+    _debugTapCount++;
+
+    // 重置点击计数器的定时器
+    _debugTapTimer?.cancel();
+    _debugTapTimer = Timer(const Duration(seconds: 2), () {
+      _debugTapCount = 0;
+    });
+
+    // 连续点击5次激活调试模式
+    if (_debugTapCount >= 5) {
+      setState(() {
+        _debugMode = !_debugMode;
+        _debugTapCount = 0;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('调试模式: ${_debugMode ? "已开启" : "已关闭"}'),
+          duration: const Duration(seconds: 1),
+        ),
+      );
+    }
+  }
+
+  // 设置悬浮窗消息监听
+  void _setupOverlayListener() {
+    final overlayService = OverlayService();
+
+    // 取消之前的订阅（如果有）
+    _overlayDataSubscription?.cancel();
+
+    // 监听来自悬浮窗的数据
+    _overlayDataSubscription = overlayService.dataStream.listen((data) {
+      _handleOverlayData(data);
+    });
+  }
+
+  // 处理来自悬浮窗的数据
+  void _handleOverlayData(Map<String, dynamic> data) {
+    if (!mounted) return;
+
+    // 根据数据类型处理不同的消息
+    if (data.containsKey('type')) {
+      final type = data['type'];
+
+      switch (type) {
+        case 'analysis_result':
+          // 处理棋盘分析结果
+          if (data.containsKey('fen') && data.containsKey('player')) {
+            setState(() {
+              _lastRecognizedFen = data['fen'];
+              if (data.containsKey('engineHint')) {
+                _lastEngineHint = data['engineHint'];
+              }
+              _lastUpdateTime = DateTime.now();
+            });
+
+            // 如果需要，可以在这里显示分析结果通知
+            if (_debugMode) {
+              _showOverlayUpdateNotification('收到棋盘识别结果');
+            }
+          }
+          break;
+
+        case 'status':
+        case 'error':
+          // 处理状态更新或错误消息
+          if (data.containsKey('message')) {
+            final message = data['message'];
+            final isError = type == 'error';
+
+            if (_debugMode) {
+              _showOverlayUpdateNotification(
+                isError ? '悬浮窗错误: $message' : '悬浮窗状态: $message',
+                isError: isError,
+              );
+            }
+          }
+          break;
+
+        case 'toggle_capture':
+          // 处理捕获状态切换
+          if (_debugMode) {
+            _showOverlayUpdateNotification('悬浮窗捕获状态切换');
+          }
+          break;
+
+        default:
+          print('收到未知类型的悬浮窗消息: $type');
+          break;
+      }
+    }
+  }
+
+  // 显示悬浮窗更新通知
+  void _showOverlayUpdateNotification(String message, {bool isError = false}) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        duration: const Duration(seconds: 2),
+        backgroundColor: isError ? Colors.red : null,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     //
@@ -172,16 +288,16 @@ class MainMenuState extends State<MainMenu>
       );
 
       return Expanded(
-        flex: 4,
+        flex: 8,
         child: Column(
           children: [
-            // TextButton(
-            //   child: Text(
-            //     '人机练习',
-            //     style: menuItemStyle,
-            //   ),
-            //   onPressed: () => navigateTo(GameScene.battle),
-            // ),
+            TextButton(
+              child: Text(
+                '人机练习',
+                style: menuItemStyle,
+              ),
+              onPressed: () => navigateTo(GameScene.battle),
+            ),
             // const Expanded(child: SizedBox()),
             // TextButton(
             //   child: Text(
@@ -213,16 +329,57 @@ class MainMenuState extends State<MainMenu>
               children: [
                 TextButton(
                   onPressed: _toggleOverlay,
-                  child: Text('悬浮窗口', style: menuItemStyle),
-                ),
-                if (_isOverlayShown)
-                  TextButton(
-                    onPressed: _changeOverlayColor,
-                    child: Text('改变颜色', style: menuItemStyle),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text('棋盘识别悬浮窗', style: menuItemStyle),
+                      const SizedBox(width: 8),
+                      // 显示悬浮窗状态指示器
+                      Container(
+                        width: 12,
+                        height: 12,
+                        decoration: BoxDecoration(
+                          color: _isOverlayShown ? Colors.green : Colors.grey,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ],
                   ),
+                ),
               ],
             ),
-            const Expanded(flex: 4, child: SizedBox()),
+            // 如果有调试模式且悬浮窗已经打开，显示最近识别的信息
+            if (_debugMode && _isOverlayShown && _lastRecognizedFen != null) ...[
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Column(
+                  children: [
+                    Text(
+                      '悬浮窗最新识别:',
+                      style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+                    ),
+                    const SizedBox(height: 4),
+                    if (_lastEngineHint != null)
+                      Text(
+                        _lastEngineHint!,
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                        textAlign: TextAlign.center,
+                      ),
+                    if (_lastUpdateTime != null)
+                      Text(
+                        '更新时间: ${_formatTime(_lastUpdateTime!)}',
+                        style: TextStyle(fontSize: 10, color: Colors.grey[600]),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+            const Expanded(flex: 3, child: SizedBox()),
           ],
         ),
       );
@@ -234,21 +391,36 @@ class MainMenuState extends State<MainMenu>
           const Expanded(flex: 2, child: SizedBox()),
           Hero(tag: 'logo', child: Image.asset('images/logo.png')),
           const Expanded(child: SizedBox()),
-          Transform.scale(
-            scale: _inAnimation.value,
-            child: Text(
-              '象棋课堂',
-              style: nameStyle,
-              textAlign: TextAlign.center,
+          GestureDetector(
+            onTap: _handleTitleTap, // 添加点击处理
+            child: Transform.scale(
+              scale: _inAnimation.value,
+              child: Text(
+                '象棋课堂',
+                style: nameStyle,
+                textAlign: TextAlign.center,
+              ),
             ),
           ),
           const Expanded(child: SizedBox()),
           buildActionCtrls(),
           const Expanded(flex: 2, child: SizedBox()),
           Container(height: 10),
-          Text(
-            '用心娱乐，为爱传承',
-            style: GameFonts.art(color: Colors.black54, fontSize: 16),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                '用心娱乐，为爱传承',
+                style: GameFonts.art(color: Colors.black54, fontSize: 16),
+              ),
+              // 添加调试模式按钮
+              if (_debugMode)
+                IconButton(
+                  icon: const Icon(Icons.bug_report, color: Colors.grey),
+                  onPressed: () => DebugRoutes.showDebugMenu(context),
+                  tooltip: '打开调试菜单',
+                ),
+            ],
           ),
           const Expanded(child: SizedBox()),
         ],
@@ -324,25 +496,42 @@ class MainMenuState extends State<MainMenu>
 
     if (_isOverlayShown) {
       await service.closeOverlay();
-      _isOverlayShown = false;
+      setState(() => _isOverlayShown = false);
     } else {
-      await service.showOverlay();
-      _isOverlayShown = true;
+      final result = await service.showOverlay();
+      setState(() => _isOverlayShown = result);
+
+      if (result) {
+        // 悬浮窗显示成功，发送测试消息
+        await Future.delayed(const Duration(milliseconds: 500));
+        await service.sendCommand('test_connection', {
+          'message': '主应用连接测试',
+          'timestamp': DateTime.now().millisecondsSinceEpoch,
+        });
+
+        // 如果需要，可以自动开始捕获
+        // await service.startCapture();
+      }
     }
   }
 
   void _changeOverlayColor() async {
-    if (_isOverlayShown) {
-      await OverlayService().changeOverlayColor();
-    }
+    // 已弃用
   }
 
   @override
   void dispose() {
+    _debugTapTimer?.cancel();
+    _overlayDataSubscription?.cancel();
     //
     _inController.dispose();
     _shadowController.dispose();
 
     super.dispose();
+  }
+
+  // 格式化时间
+  String _formatTime(DateTime time) {
+    return '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}:${time.second.toString().padLeft(2, '0')}';
   }
 }

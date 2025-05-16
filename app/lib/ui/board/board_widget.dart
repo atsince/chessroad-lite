@@ -37,6 +37,9 @@ class BoardWidget extends StatelessWidget {
       ),
       child: Consumer<BoardState>(
         builder: (context, board, child) {
+          print("Kevin 444 ${ (width - Ruler.kBoardPadding * 2) / 9 / 2 +
+              Ruler.kBoardPadding -
+              Ruler.kBoardDigitsTextFontSize / 2}");
           return Stack(
             children: <Widget>[
               RepaintBoundary(

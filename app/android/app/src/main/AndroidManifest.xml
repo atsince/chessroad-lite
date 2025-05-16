@@ -10,6 +10,9 @@
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <uses-permission android:name="android.permission.MEDIA_PROJECTION" />
+
 
     <application
         android:icon="@mipmap/ic_launcher"
@@ -35,11 +38,18 @@
             </intent-filter>
         </activity>
 
+<!--        <service android:name="flutter.overlay.window.flutter_overlay_window.OverlayService"-->
+<!--            android:exported="false"-->
+<!--            android:foregroundServiceType="specialUse">-->
+<!--            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"-->
+<!--                android:value="Overlay for quick access"/>-->
+<!--        </service>-->
+
         <service android:name="flutter.overlay.window.flutter_overlay_window.OverlayService"
-            android:exported="false"
-            android:foregroundServiceType="specialUse">
+          android:exported="false"
+          android:foregroundServiceType="specialUse">
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Overlay for quick access"/>
+              android:value="explanation_for_special_use"/>
         </service>
 
         <!-- Don't delete the meta-data below.

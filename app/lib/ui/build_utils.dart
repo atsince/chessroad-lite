@@ -97,7 +97,34 @@ Widget createPageHeader(BuildContext context, GameScene scene,
     ),
   );
 }
+Widget createChessBoardMini(BuildContext context, GameScene scene,
+    {Function(BuildContext, int)? onBoardTap, bool opponentHuman = false}) {
+  //
+  // 当屏幕的纵横比小于16/9时，限制棋盘的宽度
+  final windowSize = MediaQuery.of(context).size;
+  double height = windowSize.height, width = windowSize.width;
 
+  if (height / width < Ruler.kProperAspectRatio) {
+    width = height / Ruler.kProperAspectRatio;
+    _additionPaddingH = (windowSize.width - width) / 2 + Ruler.kBoardMargin;
+  }
+
+  final boardWidget = ThinkingBoardWidget(
+    width - _paddingH * 2,
+    onBoardTap,
+    opponentHuman: opponentHuman,
+  );
+
+  return Container(
+    margin: EdgeInsets.symmetric(
+      horizontal: 0,
+      vertical:0,
+    ),
+    height: 200,
+    color:Colors.green,
+    child: boardWidget,
+  );
+}
 Widget createChessBoard(BuildContext context, GameScene scene,
     {Function(BuildContext, int)? onBoardTap, bool opponentHuman = false}) {
   //
