@@ -10,6 +10,7 @@ import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 import 'package:media_projection_screenshot/media_projection_screenshot.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:http/http.dart' as http;
+import 'package:image/image.dart' as img;
 import '../services/board_recognition_service.dart';
 
 // 定义通信常量
@@ -194,7 +195,7 @@ class OverlayService {
     });
 
     // 立即执行第一次截屏
-    await captureAndAnalyzeScreen();
+    // await captureAndAnalyzeScreen();
   }
 
   Future<void> stopCapturing() async {
@@ -235,7 +236,7 @@ class OverlayService {
       final tempFile = await _saveScreenshotToTemp(screenshotBytes);
 
       // 上传截屏到棋盘识别服务
-      // await _recognizeBoard(tempFile);
+      await _recognizeBoard(tempFile);
 
     } catch (e) {
       await showError('截屏分析出错: $e');
@@ -273,6 +274,20 @@ class OverlayService {
     final tempDir = await getDownloadsDirectory();
     final file = File('${tempDir?.path}/screenshot_${DateTime.now().millisecondsSinceEpoch}.jpg');
     print("Kevin 666 ${file.absolute}");
+
+    // 压缩图片尺寸到最大1500像素
+    final image = img.decodeImage(bytes);
+    if (image != null) {
+      final int maxDimension = 1500;
+      if (image.width > maxDimension || image.height > maxDimension) {
+        double ratio = maxDimension / max(image.width, image.height);
+        int newWidth = (image.width * ratio).round();
+        int newHeight = (image.height * ratio).round();
+        final resized = img.copyResize(image, width: newWidth, height: newHeight);
+        bytes = Uint8List.fromList(img.encodeJpg(resized));
+      }
+    }
+
     await file.writeAsBytes(bytes);
     return file;
   }
@@ -295,12 +310,15 @@ class OverlayService {
         final parts = result.fen!.split(' ');
         final String sideToMove = parts.length > 1 ? parts[1] : 'w';
         final currentPlayer = sideToMove == 'w' ? 'red' : 'black';
+        print('FEN parts: $parts');
+        print('Side to move: $sideToMove');
+        print('Current player: $currentPlayer');
 
-        // 更新棋盘状态
+        // // 更新棋盘状态
         await updateBoard(result.fen!, currentPlayer);
 
-        // 通知主应用请求引擎分析
-        await requestEngineHint();
+        // // 通知主应用请求引擎分析
+        // await requestEngineHint();
       } else {
         await showError(result.message ?? '棋盘识别失败');
       }
