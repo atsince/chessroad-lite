@@ -88,6 +88,24 @@ class MediaProjectionScreenshotPlugin : FlutterPlugin, MethodCallHandler, EventC
 
   override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
     methodChannel.setMethodCallHandler(null)
+
+    // Clean up resources to prevent BufferQueue abandoned errors
+    if (isLiving.get()) {
+      isLiving.set(false)
+    }
+
+    // Release VirtualDisplay
+    mVirtualDisplay?.release()
+    mVirtualDisplay = null
+
+    // Close and release ImageReader
+    mImageReader?.surface?.release()
+    mImageReader?.close()
+    mImageReader = null
+
+    // Release MediaProjection
+    mediaProjection?.stop()
+    mediaProjection = null
   }
 
 
@@ -128,15 +146,22 @@ class MediaProjectionScreenshotPlugin : FlutterPlugin, MethodCallHandler, EventC
       return
     }
 
-    mVirtualDisplay?.release()
-    mVirtualDisplay = null
+    try {
+      // Release VirtualDisplay first
+      mVirtualDisplay?.release()
+      mVirtualDisplay = null
 
-    mImageReader?.surface?.release()
-    mImageReader?.close()
-    mImageReader = null
+      // Properly release the ImageReader resources
+      mImageReader?.surface?.release()
+      mImageReader?.close()
+      mImageReader = null
 
-    Log.i(LOG_TAG, "Screen capture stopped")
-    result.success(true)
+      Log.i(LOG_TAG, "Screen capture stopped and resources released")
+      result.success(true)
+    } catch (e: Exception) {
+      Log.e(LOG_TAG, "Error stopping capture: ${e.message}")
+      result.error(LOG_TAG, "Error stopping capture: ${e.message}", null)
+    }
   }
 
   @SuppressLint("WrongConstant")
@@ -146,108 +171,126 @@ class MediaProjectionScreenshotPlugin : FlutterPlugin, MethodCallHandler, EventC
       result.error(LOG_TAG, "Create media projection failed because system api level is lower than 21", null)
       return
     }
-    result.error(LOG_TAG, "Kevin 666 has fdafsdfdsfdsf", null)
-    Log.i(LOG_TAG, "Kevin 666 has fdafsdfdsfdsf")
+
+    Log.i(LOG_TAG, "Starting screen capture")
+
     if (mediaProjection == null) {
-      result.error(LOG_TAG, "Kevin 666 Must request permission before take capture", null)
-      Log.i(LOG_TAG, "Kevin 666 Must request permission before take capturf")
+      result.error(LOG_TAG, "Must request permission before taking capture", null)
+      Log.i(LOG_TAG, "Must request permission before taking capture")
       return
     }
 
     if (!isLiving.compareAndSet(false, true)) {
-      result.error(LOG_TAG, "Screen capture has started", null)
+      result.error(LOG_TAG, "Screen capture has already started", null)
       return
     }
 
-    val metrics = Resources.getSystem().displayMetrics
-    val width = metrics.widthPixels
-    val height = metrics.heightPixels
+    try {
+      // Clean up any existing resources first (just in case)
+      mVirtualDisplay?.release()
+      mImageReader?.close()
 
-    if (mImageReader == null) {
-      mImageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 5)
-    }
+      val metrics = Resources.getSystem().displayMetrics
+      val width = metrics.widthPixels
+      val height = metrics.heightPixels
 
-    mVirtualDisplay = mediaProjection?.createVirtualDisplay(
-      CAPTURE_CONTINUOUS,
-      width,
-      height,
-      1,
-      DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC,
-      mImageReader!!.surface,
-      null,
-      null,
-    )
-
-    val region = call.arguments as Map<*, *>?
-    val fps = region?.let {
-      region["fps"] as Int?
-    } ?: FPS
-    Log.i(LOG_TAG, "Screen capture started: FPS = $fps")
-
-    mImageReader!!.setOnImageAvailableListener({ reader ->
-      val image = reader.acquireLatestImage()
-      val start = System.currentTimeMillis()
-
-      val planes = image.planes
-      val buffer = planes[0].buffer
-      val pixelStride = planes[0].pixelStride
-      val rowStride = planes[0].rowStride
-      val rowPadding = rowStride - pixelStride * width
-      val padding = rowPadding / pixelStride
-
-      var bitmap = Bitmap.createBitmap(width + padding, height, Bitmap.Config.ARGB_8888)
-      bitmap.copyPixelsFromBuffer(buffer)
-
-      image.close()
-
-      // 控制速率
-      if (fps == 0 || System.currentTimeMillis() - processingTime.get() >= 1000 / fps) {
-        processingTime.set(System.currentTimeMillis())
-        region?.let { params ->
-          val x = params["x"] as Int?
-          val y = params["y"] as Int?
-          val w = params["width"] as Int?
-          val h = params["height"] as Int?
-          if (x != null && y != null && w != null && h != null) {
-            bitmap = bitmap.crop(x + padding / 2, y, w, h)
-          }
-        }
-
-        val outputStream = ByteArrayOutputStream()
-        bitmap.compress(Bitmap.CompressFormat.JPEG, 100, outputStream)
-
-        // val byteArray = outputStream.toByteArray()
-        // val b64 = "data:image/png;base64," + Base64.encodeToString(byteArray, Base64.NO_WRAP)
-
-        // val file = File("${context.cacheDir.absolutePath}/${System.currentTimeMillis()}.jpeg")
-        // val fOut = file.outputStream()
-        // bitmap.compress(Bitmap.CompressFormat.JPEG, 100, fOut)
-        // fOut.flush()
-        // fOut.close()
-
-        val byteArray = outputStream.toByteArray()
-        val queue = counting.addAndGet(1)
-        events?.success(
-          mapOf(
-            "bytes" to byteArray,
-            "width" to bitmap.width,
-            "height" to bitmap.height,
-            "rowBytes" to bitmap.rowBytes,
-            "format" to Bitmap.Config.ARGB_8888.toString(),
-            "pixelStride" to pixelStride,
-            "rowStride" to rowStride,
-            "nv21" to getYV12(bitmap.width, bitmap.height, bitmap),
-            "time" to System.currentTimeMillis(),
-            "queue" to queue,
-          )
-        )
-
-        val ts = System.currentTimeMillis() - start
-        Log.i(LOG_TAG, "n = \t${queue}, ts = $ts\t, outputStream.size = ${outputStream.size()}")
+      if (mImageReader == null) {
+        mImageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 5)
       }
-    }, null)
 
-    result.success(true)
+      mVirtualDisplay = mediaProjection?.createVirtualDisplay(
+        CAPTURE_CONTINUOUS,
+        width,
+        height,
+        1,
+        DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC,
+        mImageReader!!.surface,
+        null,
+        null,
+      )
+
+      val region = call.arguments as Map<*, *>?
+      val fps = region?.let {
+        region["fps"] as Int?
+      } ?: FPS
+      Log.i(LOG_TAG, "Screen capture started: FPS = $fps")
+
+      mImageReader!!.setOnImageAvailableListener({ reader ->
+        try {
+          val image = reader.acquireLatestImage()
+          if (image == null) {
+            Log.w(LOG_TAG, "Acquired image is null")
+            return@setOnImageAvailableListener
+          }
+
+          val start = System.currentTimeMillis()
+
+          val planes = image.planes
+          val buffer = planes[0].buffer
+          val pixelStride = planes[0].pixelStride
+          val rowStride = planes[0].rowStride
+          val rowPadding = rowStride - pixelStride * width
+          val padding = rowPadding / pixelStride
+
+          var bitmap = Bitmap.createBitmap(width + padding, height, Bitmap.Config.ARGB_8888)
+          bitmap.copyPixelsFromBuffer(buffer)
+
+          image.close()
+
+          // 控制速率
+          if (fps == 0 || System.currentTimeMillis() - processingTime.get() >= 1000 / fps) {
+            processingTime.set(System.currentTimeMillis())
+            region?.let { params ->
+              val x = params["x"] as Int?
+              val y = params["y"] as Int?
+              val w = params["width"] as Int?
+              val h = params["height"] as Int?
+              if (x != null && y != null && w != null && h != null) {
+                bitmap = bitmap.crop(x + padding / 2, y, w, h)
+              }
+            }
+
+            val outputStream = ByteArrayOutputStream()
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 100, outputStream)
+
+            val byteArray = outputStream.toByteArray()
+            val queue = counting.addAndGet(1)
+            events?.success(
+              mapOf(
+                "bytes" to byteArray,
+                "width" to bitmap.width,
+                "height" to bitmap.height,
+                "rowBytes" to bitmap.rowBytes,
+                "format" to Bitmap.Config.ARGB_8888.toString(),
+                "pixelStride" to pixelStride,
+                "rowStride" to rowStride,
+                "nv21" to getYV12(bitmap.width, bitmap.height, bitmap),
+                "time" to System.currentTimeMillis(),
+                "queue" to queue,
+              )
+            )
+
+            val ts = System.currentTimeMillis() - start
+            Log.i(LOG_TAG, "n = \t${queue}, ts = $ts\t, outputStream.size = ${outputStream.size()}")
+          }
+        } catch (e: Exception) {
+          Log.e(LOG_TAG, "Error processing image: ${e.message}")
+          e.printStackTrace()
+        }
+      }, null)
+
+      result.success(true)
+    } catch (e: Exception) {
+      // Clean up if an error occurs
+      isLiving.set(false)
+      mVirtualDisplay?.release()
+      mVirtualDisplay = null
+      mImageReader?.close()
+      mImageReader = null
+
+      Log.e(LOG_TAG, "Error starting capture: ${e.message}")
+      result.error(LOG_TAG, "Error starting capture: ${e.message}", null)
+    }
   }
 
   @SuppressLint("WrongConstant")
@@ -256,79 +299,99 @@ class MediaProjectionScreenshotPlugin : FlutterPlugin, MethodCallHandler, EventC
       result.error(LOG_TAG, "Create media projection failed because system api level is lower than 21", null)
       return
     }
-    Log.i(LOG_TAG, "Kevin 666 ddddddd, this = ${System.identityHashCode(this)}")
+
+    Log.i(LOG_TAG, "Taking single capture")
+
     if (mediaProjection == null) {
       result.error(LOG_TAG, "Must request permission before take capture", null)
-      Log.i(LOG_TAG, "Kevin 666 Must request permission before take capturf")
       return
     }
 
-    val metrics = Resources.getSystem().displayMetrics
-    val width = metrics.widthPixels
-    val height = metrics.heightPixels
+    try {
+      val metrics = Resources.getSystem().displayMetrics
+      val width = metrics.widthPixels
+      val height = metrics.heightPixels
 
-    val imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 5)
+      val imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 5)
 
-    mediaProjection?.createVirtualDisplay(
-      CAPTURE_SINGLE,
-      width,
-      height,
-      1,
-      DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC,
-      imageReader.surface,
-      null,
-      null,
-    )
-
-    Handler(Looper.getMainLooper()).postDelayed({
-      val image = imageReader.acquireLatestImage() ?: return@postDelayed
-
-      val planes = image.planes
-      val buffer = planes[0].buffer
-      val pixelStride = planes[0].pixelStride
-      val rowStride = planes[0].rowStride
-      val rowPadding = rowStride - pixelStride * width
-      val padding = rowPadding / pixelStride
-
-      var bitmap = Bitmap.createBitmap(width + padding, height, Bitmap.Config.ARGB_8888)
-      bitmap.copyPixelsFromBuffer(buffer)
-
-      image.close()
-      mVirtualDisplay?.release()
-
-      val region = call.arguments as Map<*, *>?
-      region?.let {
-        val x = it["x"] as Int + padding / 2
-        val y = it["y"] as Int
-        val w = it["width"] as Int
-        val h = it["height"] as Int
-
-        bitmap = bitmap.crop(x, y, w, h)
-      }
-
-      val outputStream = ByteArrayOutputStream()
-      bitmap.compress(Bitmap.CompressFormat.PNG, 100, outputStream)
-
-      val byteArray = outputStream.toByteArray()
-      // val b64 = "data:image/png;base64," + Base64.encodeToString(byteArray, Base64.NO_WRAP)
-      // Log.i(LOG_TAG, "base64 = $b64")
-
-      result.success(
-        mapOf(
-          "bytes" to byteArray,
-          "width" to bitmap.width,
-          "height" to bitmap.height,
-          "rowBytes" to bitmap.rowBytes,
-          "format" to Bitmap.Config.ARGB_8888.toString(),
-          "pixelStride" to pixelStride,
-          "rowStride" to rowStride,
-          "nv21" to getYV12(bitmap.width, bitmap.height, bitmap),
-          "time" to System.currentTimeMillis(),
-          "queue" to 1,
-          // "base64" to b64,
-        )
+      val virtualDisplay = mediaProjection?.createVirtualDisplay(
+        CAPTURE_SINGLE,
+        width,
+        height,
+        1,
+        DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC,
+        imageReader.surface,
+        null,
+        null,
       )
-    }, 100)
+
+      Handler(Looper.getMainLooper()).postDelayed({
+        try {
+          val image = imageReader.acquireLatestImage()
+          if (image == null) {
+            Log.e(LOG_TAG, "Failed to acquire image")
+            result.error(LOG_TAG, "Failed to acquire image", null)
+            virtualDisplay?.release()
+            imageReader.close()
+            return@postDelayed
+          }
+
+          val planes = image.planes
+          val buffer = planes[0].buffer
+          val pixelStride = planes[0].pixelStride
+          val rowStride = planes[0].rowStride
+          val rowPadding = rowStride - pixelStride * width
+          val padding = rowPadding / pixelStride
+
+          var bitmap = Bitmap.createBitmap(width + padding, height, Bitmap.Config.ARGB_8888)
+          bitmap.copyPixelsFromBuffer(buffer)
+
+          image.close()
+          virtualDisplay?.release()
+          imageReader.close()
+
+          val region = call.arguments as Map<*, *>?
+          region?.let {
+            val x = it["x"] as Int? ?: 0
+            val y = it["y"] as Int? ?: 0
+            val w = it["width"] as Int?
+            val h = it["height"] as Int?
+
+            if (w != null && h != null && w > 0 && h > 0) {
+              bitmap = bitmap.crop(x + padding / 2, y, w, h)
+            }
+          }
+
+          val outputStream = ByteArrayOutputStream()
+          bitmap.compress(Bitmap.CompressFormat.PNG, 100, outputStream)
+
+          val byteArray = outputStream.toByteArray()
+
+          result.success(
+            mapOf(
+              "bytes" to byteArray,
+              "width" to bitmap.width,
+              "height" to bitmap.height,
+              "rowBytes" to bitmap.rowBytes,
+              "format" to Bitmap.Config.ARGB_8888.toString(),
+              "pixelStride" to pixelStride,
+              "rowStride" to rowStride,
+              "nv21" to getYV12(bitmap.width, bitmap.height, bitmap),
+              "time" to System.currentTimeMillis(),
+              "queue" to 1,
+            )
+          )
+        } catch (e: Exception) {
+          Log.e(LOG_TAG, "Error in takeCapture: ${e.message}")
+          result.error(LOG_TAG, "Error in takeCapture: ${e.message}", null)
+          virtualDisplay?.release()
+          imageReader.close()
+        }
+      }, 100)
+    } catch (e: Exception) {
+      Log.e(LOG_TAG, "Error setting up capture: ${e.message}")
+      result.error(LOG_TAG, "Error setting up capture: ${e.message}", null)
+    }
   }
 
   private fun Bitmap.crop(x: Int, y: Int, width: Int, height: Int): Bitmap {
