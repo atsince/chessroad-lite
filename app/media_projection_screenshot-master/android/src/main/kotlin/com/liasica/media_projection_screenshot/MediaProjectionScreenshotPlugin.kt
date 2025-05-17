@@ -25,6 +25,9 @@ import io.flutter.plugin.common.MethodChannel.Result
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
+import android.view.WindowManager
+import android.graphics.Point
+import android.util.DisplayMetrics
 
 
 /** MediaProjectionScreenshotPlugin */
@@ -190,9 +193,12 @@ class MediaProjectionScreenshotPlugin : FlutterPlugin, MethodCallHandler, EventC
       mVirtualDisplay?.release()
       mImageReader?.close()
 
-      val metrics = Resources.getSystem().displayMetrics
-      val width = metrics.widthPixels
-      val height = metrics.heightPixels
+      // 使用getRealScreenSize方法获取实际屏幕尺寸
+      val screenSize = getRealScreenSize()
+      val width = screenSize.x
+      val height = screenSize.y
+
+      Log.i(LOG_TAG, "Screen capture size: width=$width, height=$height")
 
       if (mImageReader == null) {
         mImageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 5)
@@ -257,6 +263,8 @@ class MediaProjectionScreenshotPlugin : FlutterPlugin, MethodCallHandler, EventC
               }
             }
 
+            bitmap = bitmap.crop(padding / 2, 0, width, height)
+            Log.i(LOG_TAG, "Kevin 666 Screen capture info: width=$width, height=$height, padding=$padding")
             val outputStream = ByteArrayOutputStream()
             bitmap.compress(Bitmap.CompressFormat.JPEG, 100, outputStream)
 
@@ -317,9 +325,12 @@ class MediaProjectionScreenshotPlugin : FlutterPlugin, MethodCallHandler, EventC
     }
 
     try {
-      val metrics = Resources.getSystem().displayMetrics
-      val width = metrics.widthPixels
-      val height = metrics.heightPixels
+      // 使用getRealScreenSize方法获取实际屏幕尺寸
+      val screenSize = getRealScreenSize()
+      val width = screenSize.x
+      val height = screenSize.y
+
+      Log.i(LOG_TAG, "Take capture size: width=$width, height=$height")
 
       val imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 5)
 
@@ -359,17 +370,8 @@ class MediaProjectionScreenshotPlugin : FlutterPlugin, MethodCallHandler, EventC
           virtualDisplay?.release()
           imageReader.close()
 
-          // val region = call.arguments as Map<*, *>?
-          // region?.let {
-          //   val x = it["x"] as Int? ?: 0
-          //   val y = it["y"] as Int? ?: 0
-          //   val w = it["width"] as Int?
-          //   val h = it["height"] as Int?
-
-          //   if (w != null && h != null && w > 0 && h > 0) {
-          //     bitmap = bitmap.crop(x + padding / 2, y, w, h)
-          //   }
-          // }
+          // 添加裁剪逻辑，去除两边黑边
+          bitmap = bitmap.crop(padding / 2, 0, width, height)
 
           val outputStream = ByteArrayOutputStream()
           bitmap.compress(Bitmap.CompressFormat.PNG, 100, outputStream)
@@ -452,5 +454,24 @@ class MediaProjectionScreenshotPlugin : FlutterPlugin, MethodCallHandler, EventC
         index++
       }
     }
+  }
+
+  // 添加获取实际屏幕尺寸的方法
+  private fun getRealScreenSize(): Point {
+    val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+    val point = Point()
+
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+      // Android 11及以上使用新API
+      val metrics = wm.currentWindowMetrics
+      point.x = metrics.bounds.width()
+      point.y = metrics.bounds.height()
+    } else {
+      // Android 11以下使用旧API
+      val display = wm.defaultDisplay
+      display.getRealSize(point)
+    }
+
+    return point
   }
 }

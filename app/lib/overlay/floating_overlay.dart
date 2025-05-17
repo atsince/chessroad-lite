@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 import 'package:matrix_gesture_detector/matrix_gesture_detector.dart';
@@ -47,7 +48,7 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
 
   // 基础尺寸，缩放基于此尺寸
   final double _baseWidth = 500.0;
-  final double _baseHeight = 1000.0;
+  final double _baseHeight = 800.0;
 
   double get _currentWidth => _baseWidth * _currentScale;
   double get _currentHeight => _baseHeight * _currentScale;
@@ -66,6 +67,9 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
   DateTime _lastUpdateTime = DateTime.now();
   Timer? _stabilizeTimer;
   bool _isDragging = false;
+
+  // 位置追踪相关
+  Timer? _positionReportTimer;
 
   // 引用OverlayService
   // final OverlayService _overlayService = OverlayService();
@@ -102,6 +106,9 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
         'message': '悬浮窗初始化完成'
       });
     });
+
+    // 开始定期报告位置
+    _startPositionReporting();
   }
 
   // 设置悬浮窗接收端口
@@ -787,6 +794,9 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
           setState(() {
             _isDragging = false;
           });
+
+          // 拖动结束后立即更新位置
+          _reportOverlayPosition();
         }
       });
     }
@@ -819,6 +829,71 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
     }
   }
 
+  // 开始定期报告悬浮窗位置
+  void _startPositionReporting() {
+    // 首次报告位置前等待1秒确保悬浮窗完全初始化
+    Future.delayed(const Duration(seconds: 1), () {
+      // 立即报告一次位置
+      _reportOverlayPosition();
+
+      // 每5秒报告一次位置
+      _positionReportTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
+        if (mounted) {
+          _reportOverlayPosition();
+        } else {
+          timer.cancel();
+        }
+      });
+    });
+  }
+
+  // 报告悬浮窗位置
+  void _reportOverlayPosition() async {
+    try {
+      // 检查是否是悬浮窗模式
+      final isActive = await FlutterOverlayWindow.isActive();
+      if (!isActive) {
+        print('当前不是悬浮窗模式，跳过位置报告');
+        return;
+      }
+      // await FlutterOverlayWindow.moveOverlay(OverlayPosition(200, 200));
+      // 使用FlutterOverlayWindow.getOverlayPosition()获取悬浮窗位置
+      final position = await FlutterOverlayWindow.getOverlayPosition();
+
+      if (position != null) {
+        final devicePixelRatio = MediaQuery.of(context).devicePixelRatio;
+
+        // 确保所有值都不为null
+        // 获取dp单位的坐标（以左上角为原点）
+        final double dpX = position.x ?? 0.0;
+        final double dpY = position.y ?? 0.0;
+
+
+        // 将dp转换为物理像素值
+        final double physicalX = dpX * devicePixelRatio;
+        final double physicalY = dpY * devicePixelRatio;
+        final double physicalWidth = _currentWidth;
+        final double physicalHeight = _currentHeight;
+
+        print('悬浮窗位置: dp=($dpX, $dpY), $devicePixelRatio  物理像素=($physicalX, $physicalY), 物理像素=${physicalWidth}x${physicalHeight}');
+
+        // 发送位置信息到主应用
+        _sendMessageToMain({
+          'type': 'overlay_position',
+          'x': physicalX,
+          'y': physicalY,
+          'width': physicalWidth,
+          'height': physicalHeight,
+          'timestamp': DateTime.now().millisecondsSinceEpoch,
+        });
+      } else {
+        print('无法获取悬浮窗位置，返回为null');
+      }
+    } catch (e) {
+      print('获取悬浮窗位置出错: $e');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return ChangeNotifierProvider.value(
@@ -829,7 +904,7 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
             clipChild: false,
             focalPointAlignment: Alignment.center,
             shouldRotate: false, // 禁用旋转
-            shouldScale: true,   // 允许缩放
+            shouldScale: false,   // 允许缩放
             shouldTranslate: true, // 允许平移
             onMatrixUpdate: _handleMatrixUpdate,
             child: AnimatedContainer(
@@ -1142,6 +1217,7 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
 
     // 取消定时器
     _stabilizeTimer?.cancel();
+    _positionReportTimer?.cancel();
 
     super.dispose();
   }

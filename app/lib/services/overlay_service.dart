@@ -37,6 +37,7 @@ class OverlayConstants {
   static const String TYPE_STATUS = 'status';
   static const String TYPE_ERROR = 'error';
   static const String TYPE_TOGGLE_CAPTURE = 'toggle_capture';
+  static const String TYPE_OVERLAY_POSITION = 'overlay_position'; // 添加悬浮窗位置类型
 }
 
 class OverlayService {
@@ -50,6 +51,9 @@ class OverlayService {
   var screenShot2 = MediaProjectionScreenshot();
   StreamSubscription? _captureStreamSubscription;
   DateTime? _lastCaptureTime;
+
+  // 保存悬浮窗位置和尺寸信息
+  Rect? _overlayRect;
 
   final StreamController<Map<String, dynamic>> _dataController = StreamController<Map<String, dynamic>>.broadcast();
 
@@ -168,8 +172,30 @@ class OverlayService {
         }
         break;
 
+      case OverlayConstants.TYPE_OVERLAY_POSITION:
+        // 处理悬浮窗位置信息
+        if (data.containsKey('x') &&
+            data.containsKey('y') &&
+            data.containsKey('width') &&
+            data.containsKey('height')) {
+          _updateOverlayPosition(
+            data['x'].toDouble(),
+            data['y'].toDouble(),
+            data['width'].toDouble(),
+            data['height'].toDouble()
+          );
+        }
+        break;
+
       // 其他消息类型的处理...
     }
+  }
+
+  // 更新悬浮窗位置信息
+  void _updateOverlayPosition(double x, double y, double width, double height) {
+    // 创建一个表示悬浮窗区域的Rect
+    _overlayRect = Rect.fromLTWH(x, y, width, height);
+    print('更新悬浮窗位置: $_overlayRect');
   }
 
   // 屏幕捕获相关方法
@@ -222,8 +248,18 @@ class OverlayService {
                   final capturedImage = CapturedImage.fromMap(Map<String, dynamic>.from(data));
                   if (capturedImage.bytes != null) {
                     debugPrint('处理截屏数据 - ${now.toIso8601String()}');
-                    // 保存截屏到临时文件
-                    final tempFile = await _saveScreenshotToTemp(capturedImage.bytes);
+
+                    // 判断是否需要绿幕处理
+                    Uint8List processedImageBytes = capturedImage.bytes;
+                    if (_overlayRect != null) {
+                      processedImageBytes = await _applyGreenScreenToOverlayArea(capturedImage.bytes);
+                    }
+
+                    // 保存处理后的截屏到临时文件
+                    final tempFile = await _saveScreenshotToTemp(processedImageBytes);
+                    // 打印临时文件大小
+                    final fileSize = await tempFile.length();
+                    debugPrint('临时文件大小: ${fileSize} bytes');
                     // 上传截屏到棋盘识别服务
                     await _recognizeBoard(tempFile);
                   }
@@ -293,10 +329,10 @@ class OverlayService {
     final file = File('${tempDir?.path}/screenshot_${DateTime.now().millisecondsSinceEpoch}.jpg');
     print("Kevin 666 ${file.absolute}");
 
-    // 压缩图片尺寸到最大1500像素
+    //压缩图片尺寸到最大1000像素
     final image = img.decodeImage(bytes);
     if (image != null) {
-      final int maxDimension = 1500;
+      final int maxDimension = 800;
       if (image.width > maxDimension || image.height > maxDimension) {
         double ratio = maxDimension / max(image.width, image.height);
         int newWidth = (image.width * ratio).round();
@@ -386,15 +422,16 @@ class OverlayService {
 
     try {
       await FlutterOverlayWindow.showOverlay(
-        height: 1000,
+        height: 800,
         width: 500,
-        alignment: OverlayAlignment.centerRight,
+        alignment: OverlayAlignment.topLeft,
         flag: OverlayFlag.defaultFlag,
         visibility: NotificationVisibility.visibilityPrivate,
         enableDrag: true,
-        positionGravity: PositionGravity.auto,
+        positionGravity: PositionGravity.none,
         overlayTitle: "象棋棋路悬浮窗",
         overlayContent: "迷你棋谱实时识别",
+        startPosition: OverlayPosition(0, 0)
       );
 
       _isOverlayActive = true;
@@ -665,6 +702,69 @@ class OverlayService {
     } catch (e) {
       print('验证FEN时出错: $e');
       return false;
+    }
+  }
+
+  // 对悬浮窗区域应用绿幕处理
+  Future<Uint8List> _applyGreenScreenToOverlayArea(Uint8List imageBytes) async {
+    // 如果没有悬浮窗位置信息，直接返回原图
+    if (_overlayRect == null) return imageBytes;
+
+    try {
+      // 使用image库解码截图
+      final image = img.decodeImage(imageBytes);
+      if (image == null) return imageBytes;
+
+      // 计算悬浮窗区域在图像中的位置
+      final int left = _overlayRect!.left.round();
+      final int top = _overlayRect!.top.round();
+      final int right = _overlayRect!.right.round();
+      final int bottom = _overlayRect!.bottom.round();
+
+      // 确保坐标在图像范围内
+      final int safeLeft = max(0, min(left, image.width - 1));
+      final int safeTop = max(0, min(top, image.height - 1));
+      final int safeRight = max(0, min(right, image.width));
+      final int safeBottom = max(0, min(bottom, image.height));
+
+      // 如果区域无效则返回原图
+      if (safeLeft >= safeRight || safeTop >= safeBottom) {
+        print('悬浮窗区域无效，跳过绿幕处理');
+        return imageBytes;
+      }
+
+      // 创建绿幕颜色 (0, 255, 0)
+      final greenColor = img.ColorRgb8(0, 255, 0);
+
+      // 在悬浮窗区域应用绿幕
+      for (int y = safeTop; y < safeBottom; y++) {
+        for (int x = safeLeft; x < safeRight; x++) {
+          // 设置为绿色
+          image.setPixel(x, y, greenColor);
+        }
+      }
+
+      // 保存处理后的图像
+      final processedImageBytes = Uint8List.fromList(img.encodeJpg(image));
+
+      print('绿幕处理完成，区域: ($safeLeft, $safeTop) - ($safeRight, $safeBottom)');
+
+      // 保存一份调试用的处理后图像
+      if (processedImageBytes.length > 0) {
+        try {
+          final tempDir = await getDownloadsDirectory();
+          final debugFile = File('${tempDir?.path}/debug_green_${DateTime.now().millisecondsSinceEpoch}.jpg');
+          await debugFile.writeAsBytes(processedImageBytes);
+          print('保存调试图像到: ${debugFile.path}');
+        } catch (e) {
+          print('保存调试图像出错: $e');
+        }
+      }
+
+      return processedImageBytes;
+    } catch (e) {
+      print('应用绿幕处理时出错: $e');
+      return imageBytes; // 出错时返回原图
     }
   }
 }
