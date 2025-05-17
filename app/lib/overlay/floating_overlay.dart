@@ -29,7 +29,8 @@ class FloatingOverlay extends StatefulWidget {
 class _FloatingOverlayState extends State<FloatingOverlay> {
   String _currentPlayer = 'red'; // 'red' or 'black'
   bool _isCapturing = false;
-  String _boardFen = 'rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1';
+  // String _boardFen = 'rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1';
+  String _boardFen = '4k4/4a4/2P1ba3/2p4r1/3P2R2/9/9/4B4/4A4/2BAK4 w - - 0 1';
   // String _boardFen = '9/9/9/6p1p/9/9/9/9/9/9 w - - 0 1';
   double _currentScale = 1.0;
   final double _minScale = 0.5;
@@ -77,14 +78,19 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
     _boardState = BoardState();
     _boardState.load(_boardFen, notify: true);
 
+    // 初始化引擎
+
+     Future.delayed(Duration(microseconds: 1),() async{
+        await HybridEngine().startup();
+        await  HybridEngine().newGame();
+     });
+
+
     // 设置跨Isolate通信
     _setupOverlayIsolateReceiver();
 
     // 监听FlutterOverlayWindow消息（作为备用通道）
     _setupFlutterOverlayListener();
-
-    // 监听OverlayService的数据流
-    // _overlayService.dataStream.listen(_handleServiceData);
 
     // 发送初始化完成的消息到主应用
     Future.delayed(const Duration(milliseconds: 500), () {
@@ -230,6 +236,7 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
               //   _updateEnginePV(event['enginePV']);
               // } else {
               //   // 自动请求引擎提示
+              //   print("Kevin 666 CMD_UPDATE_BOARD request hint");
               //   _requestEngineHint();
               // }
 
@@ -400,7 +407,7 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
     }
   }
 
-  // 请求引擎提示的方法（从BoardRecognitionPage中移植而来）
+  // 请求引擎提示的方法
   Future<void> _requestEngineHint() async {
     if (_boardFen.isEmpty) {
       return;
@@ -415,6 +422,9 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
     print('请求引擎提示，走棋方: ${_currentPlayer == 'red' ? '红方' : '黑方'}');
 
     try {
+      // 先停止任何正在进行的引擎分析
+      await _stopPonder();
+      await Future.delayed(const Duration(seconds: 1));
       final position = Fen.positionFromFen(_boardFen);
       if (position == null) {
         print('无法从FEN创建棋局位置');
@@ -423,7 +433,8 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
         });
         return;
       }
-      print("Kevin 666 _requestEngineHint");
+
+      print("Kevin 666 HybridEngine().go");
       // 设置引擎预先思考几步
       await HybridEngine().go(position, _engineCallback);
     } catch (e) {
@@ -469,12 +480,14 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
     }
   }
 
-  // 引擎回调函数（从BoardRecognitionPage中移植而来）
+  // 引擎回调函数
   void _engineCallback(EngineResponse er) {
     final resp = er.response;
 
     if (resp is EngineInfo) {
-      print('引擎思考信息: ${resp.tokens}');
+      // 更新引擎信息
+      _boardState.engineInfo = resp;
+
       final score = resp.tokens['score'];
       final depth = resp.tokens['depth'];
       final cpOrMate = resp.tokens['cp_or_mate'];
@@ -484,7 +497,10 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
           ? (score > 0 ? "$score 步成杀" : "${-score} 步被杀")
           : (score == 0 ? "均势" : (score > 0 ? "优势" : "劣势"));
 
-        print('引擎评分: $score ($judgement), 深度: $depth');
+        // 检查是否找到必胜着法等情况
+        if (cpOrMate == 1 && depth >= 60) {
+          HybridEngine().stop();
+        }
       }
 
       // 保存引擎分析的走法路线，最多2步
@@ -514,6 +530,9 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
     } else if (resp is Bestmove) {
       print('引擎最佳着法: ${resp.bestmove}');
 
+      // 保存引擎提供的最佳着法
+      _boardState.bestmove = resp;
+
       if (resp.bestmove != null) {
         try {
           final move = Move.fromEngineMove(resp.bestmove);
@@ -542,7 +561,6 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
           // 尝试生成中文着法描述
           final position = Fen.positionFromFen(_boardFen);
           if (position != null) {
-            // 要在position上实际走一下这个着法，这样MoveName.translate才能正确生成着法名称
             final moveName = "${MoveName.translate(position, move)} (${resp.bestmove})";
 
             setState(() {
@@ -575,10 +593,20 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
           _isEngineThinking = false;
         });
       }
+    } else if (resp is NoBestmove) {
+      // 处理无最佳着法的情况
+      setState(() {
+        _isEngineThinking = false;
+        _engineHint = "无法找到有效走法";
+      });
+
+      // 发送状态消息
+      _sendStatusUpdate("无法找到有效走法");
     } else if (resp is Error) {
       print('引擎返回错误: ${resp.message}');
       setState(() {
         _isEngineThinking = false;
+        _engineHint = "引擎错误: ${resp.message}";
       });
 
       // 发送错误消息
@@ -608,13 +636,15 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
         // 清除引擎提示和箭头
         _engineHint = null;
         _engineMoves = [];
-        _boardState.engineInfo = null;
-        _boardState.bestmove = null;
-        _boardState.notifyListeners();
-
-        // 切换后自动请求新走法提示
-        _requestEngineHint();
       }
+    });
+
+    // 重置引擎状态
+    _stopEngine().then((_) {
+      HybridEngine().newGame();
+
+      // 切换后自动请求新走法提示
+      _requestEngineHint();
     });
   }
 
@@ -771,6 +801,25 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
       });
     }
   }
+
+  // 停止引擎的思考并清理相关资源
+  Future<void> _stopEngine() async {
+    await HybridEngine().stop();
+    setState(() {
+      _boardState.engineInfo = null;
+      _boardState.bestmove = null;
+      if (_isEngineThinking) {
+        _isEngineThinking = false;
+      }
+    });
+  }
+
+  Future<void> _stopPonder() async {
+    await HybridEngine().stopPonder();
+    _boardState.engineInfo = null;
+    _boardState.bestmove = null;
+  }
+
 
   @override
   Widget build(BuildContext context) {
@@ -959,7 +1008,14 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
                                   Material(
                                     color: Colors.transparent,
                                     child: InkWell(
-                                      onTap: _isEngineThinking ? null : _requestEngineHint,
+                                      onTap: (){
+
+                                        print("Kevin 666 click _requestEngineHint");
+
+                                        if(!_isEngineThinking){
+                                          _requestEngineHint();
+                                        }
+                                      },
                                       borderRadius: BorderRadius.circular(4 * _currentScale),
                                       child: Container(
                                         padding: EdgeInsets.symmetric(
@@ -1064,6 +1120,9 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
   void dispose() {
     // 停止捕获并清理资源
     _stopCapturing();
+
+    // 停止引擎
+    _stopEngine();
 
     // 清理IsolateNameServer相关资源
     _overlayReceivePort?.close();
