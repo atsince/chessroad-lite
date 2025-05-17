@@ -5,6 +5,7 @@ import 'dart:isolate';
 import 'dart:ui';
 import 'dart:io';
 import 'dart:typed_data';
+import 'package:chessroad/cchess/cc_fen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 import 'package:media_projection_screenshot/media_projection_screenshot.dart';
@@ -13,6 +14,8 @@ import 'package:path_provider/path_provider.dart';
 import 'package:http/http.dart' as http;
 import 'package:image/image.dart' as img;
 import '../services/board_recognition_service.dart';
+import '../cchess/position.dart';
+import '../cchess/cc_base.dart';
 
 // 定义通信常量
 class OverlayConstants {
@@ -181,7 +184,7 @@ class OverlayService {
     }
   }
 
-  Future<void> startCapturing({int intervalSeconds = 5}) async {
+  Future<void> startCapturing({int intervalSeconds = 10}) async {
     if (_isCapturing) return;
 
     final hasPermission = await requestScreenCapturePermission();
@@ -311,34 +314,43 @@ class OverlayService {
     try {
       await sendStatusUpdate('正在识别棋盘...');
 
-      final initBoard = '4k4/4a4/2P1ba3/2p4r1/3P2R2/9/9/4B4/4A4/2BAK4 w - - 0 1';
-       await updateBoard(initBoard, 'black');
-      // // 上传识别棋盘
-      // final result = await BoardRecognitionService.recognizeBoard(
-      //   imageFile,
-      //   _apiUrl,
-      // );
+      // final initBoard = '4k4/4a4/2P1ba3/2p4r1/3P2R2/9/9/4B4/4A4/2BAK4 w - - 0 1';
+      //  await updateBoard(initBoard, 'black');
+      // 上传识别棋盘
+      final result = await BoardRecognitionService.recognizeBoard(
+        imageFile,
+        _apiUrl,
+      );
 
-      // if (result.success && result.fen != null && result.fen!.isNotEmpty) {
-      //   // 成功识别棋盘
-      //   await sendStatusUpdate('棋盘识别成功，正在分析...');
+      if (result.success && result.fen != null && result.fen!.isNotEmpty) {
+        // 成功识别棋盘
+        await sendStatusUpdate('棋盘识别成功，正在验证...');
 
-      //   // 更新当前FEN和走棋方
-      //   final parts = result.fen!.split(' ');
-      //   final String sideToMove = parts.length > 1 ? parts[1] : 'w';
-      //   final currentPlayer = sideToMove == 'w' ? 'red' : 'black';
-      //   print('FEN parts: $parts');
-      //   print('Side to move: $sideToMove');
-      //   print('Current player: $currentPlayer');
+        // 验证FEN是否符合棋理
+        final bool isValidFen = validateFen(result.fen!);
 
-      //   // // 更新棋盘状态
-      //   await updateBoard(result.fen!, currentPlayer);
+        if (isValidFen) {
+          await sendStatusUpdate('棋盘验证成功，正在分析...');
 
-      //   // // 通知主应用请求引擎分析
-      //   // await requestEngineHint();
-      // } else {
-      //   await showError(result.message ?? '棋盘识别失败');
-      // }
+          // 更新当前FEN和走棋方
+          final parts = result.fen!.split(' ');
+          final String sideToMove = parts.length > 1 ? parts[1] : 'w';
+          final currentPlayer = sideToMove == 'w' ? 'red' : 'black';
+          print('FEN parts: $parts');
+          print('Side to move: $sideToMove');
+          print('Current player: $currentPlayer');
+
+          // 更新棋盘状态
+          await updateBoard(result.fen!, currentPlayer);
+
+          // // 通知主应用请求引擎分析
+          // await requestEngineHint();
+        } else {
+          await showError('棋盘布局无效，请确保棋子摆放符合规则');
+        }
+      } else {
+        await showError(result.message ?? '棋盘识别失败');
+      }
     } catch (e) {
       await showError('棋盘识别过程出错: $e');
     }
@@ -475,5 +487,184 @@ class OverlayService {
     _mainReceivePort?.close();
     IsolateNameServer.removePortNameMapping(OverlayConstants.OVERLAY_TO_MAIN_PORT_NAME);
     _dataController.close();
+  }
+
+  // 验证FEN字符串是否符合中国象棋规则
+  bool validateFen(String fen) {
+    try {
+      // 使用Fen工具类创建Position对象，如果创建失败则FEN无效
+      final position = Fen.positionFromFen(fen);
+      if (position == null) {
+        print('FEN格式无效: $fen');
+        return false;
+      }
+
+      // 检查基本规则
+      // 1. 确保双方有将/帅
+      bool hasRedKing = false;
+      bool hasBlackKing = false;
+
+      // 遍历棋盘位置检查双方是否有将/帅
+      for (int i = 0; i < 90; i++) {
+        final piece = position.pieceAt(i);
+        if (piece == Piece.redKing) {
+          hasRedKing = true;
+        } else if (piece == Piece.blackKing) {
+          hasBlackKing = true;
+        }
+      }
+
+      if (!hasRedKing || !hasBlackKing) {
+        print('缺少将或帅: 红方将=$hasRedKing, 黑方将=$hasBlackKing');
+        return false;
+      }
+
+      // 2. 确保将帅不在同一列且面对面（将帅不能对脸）
+      int redKingIndex = -1;
+      int blackKingIndex = -1;
+
+      for (int i = 0; i < 90; i++) {
+        final piece = position.pieceAt(i);
+        if (piece == Piece.redKing) {
+          redKingIndex = i;
+        } else if (piece == Piece.blackKing) {
+          blackKingIndex = i;
+        }
+      }
+
+      // 检查将帅是否在同一列
+      if (redKingIndex % 9 == blackKingIndex % 9) {
+        // 在同一列，检查中间是否有其他棋子阻挡
+        bool hasPieceBetween = false;
+        int startRow = min(redKingIndex ~/ 9, blackKingIndex ~/ 9) + 1;
+        int endRow = max(redKingIndex ~/ 9, blackKingIndex ~/ 9);
+        int file = redKingIndex % 9;
+
+        for (int row = startRow; row < endRow; row++) {
+          int idx = row * 9 + file;
+          if (position.pieceAt(idx) != Piece.noPiece) {
+            hasPieceBetween = true;
+            break;
+          }
+        }
+
+        if (!hasPieceBetween) {
+          print('将帅对脸且中间无子');
+          return false;
+        }
+      }
+
+      // 3. 检查子力数量是否合理（例如：每方最多一个将/帅，最多2个车/马/炮，最多5个兵/卒）
+      Map<String, int> pieceCounts = {};
+
+      for (int i = 0; i < 90; i++) {
+        final piece = position.pieceAt(i);
+        if (piece != Piece.noPiece) {
+          pieceCounts[piece] = (pieceCounts[piece] ?? 0) + 1;
+        }
+      }
+
+      // 验证子力数量
+      if ((pieceCounts[Piece.redKing] ?? 0) > 1 ||
+          (pieceCounts[Piece.blackKing] ?? 0) > 1) {
+        print('将/帅数量超过1个');
+        return false;
+      }
+
+      if ((pieceCounts[Piece.redRook] ?? 0) > 2 ||
+          (pieceCounts[Piece.blackRook] ?? 0) > 2 ||
+          (pieceCounts[Piece.redKnight] ?? 0) > 2 ||
+          (pieceCounts[Piece.blackKnight] ?? 0) > 2 ||
+          (pieceCounts[Piece.redCanon] ?? 0) > 2 ||
+          (pieceCounts[Piece.blackCanon] ?? 0) > 2 ||
+          (pieceCounts[Piece.redBishop] ?? 0) > 2 ||
+          (pieceCounts[Piece.blackBishop] ?? 0) > 2 ||
+          (pieceCounts[Piece.redAdvisor] ?? 0) > 2 ||
+          (pieceCounts[Piece.blackAdvisor] ?? 0) > 2) {
+        print('车/马/炮/士/象数量超过2个');
+        return false;
+      }
+
+      if ((pieceCounts[Piece.redPawn] ?? 0) > 5 ||
+          (pieceCounts[Piece.blackPawn] ?? 0) > 5) {
+        print('兵/卒数量超过5个');
+        return false;
+      }
+
+      // 4. 检查位置约束：将帅在九宫格内，士在九宫格内，象不能过河等
+      // 检查将帅位置
+      if (redKingIndex >= 0) {
+        final row = redKingIndex ~/ 9;
+        final file = redKingIndex % 9;
+        if (row < 7 || row > 9 || file < 3 || file > 5) {
+          print('红方帅不在九宫格内');
+          return false;
+        }
+      }
+
+      if (blackKingIndex >= 0) {
+        final row = blackKingIndex ~/ 9;
+        final file = blackKingIndex % 9;
+        if (row > 2 || file < 3 || file > 5) {
+          print('黑方将不在九宫格内');
+          return false;
+        }
+      }
+
+      // 遍历棋盘检查所有棋子位置合法性
+      for (int i = 0; i < 90; i++) {
+        final piece = position.pieceAt(i);
+        final row = i ~/ 9;
+        final file = i % 9;
+
+        // 检查士的位置
+        if (piece == Piece.redAdvisor) {
+          if (row < 7 || row > 9 || file < 3 || file > 5) {
+            print('红方士不在九宫格内');
+            return false;
+          }
+        } else if (piece == Piece.blackAdvisor) {
+          if (row > 2 || file < 3 || file > 5) {
+            print('黑方士不在九宫格内');
+            return false;
+          }
+        }
+
+        // 检查象的位置
+        if (piece == Piece.redBishop && row < 5) {
+          print('红方象过河');
+          return false;
+        } else if (piece == Piece.blackBishop && row > 4) {
+          print('黑方象过河');
+          return false;
+        }
+
+        // 检查卒的位置 - 过河后不能后退
+        if (piece == Piece.redPawn && row < 5) {
+          // 红方兵过河后，需要检查是否还会在最后三行
+          if (row == 4 || row == 3 || row == 2 || row == 1 || row == 0) {
+            // 过河的兵可以在任何位置
+          } else {
+            print('红方兵位置不合法');
+            return false;
+          }
+        }
+
+        if (piece == Piece.blackPawn && row > 4) {
+          // 黑方卒过河后，需要检查是否还会在最后三行
+          if (row == 5 || row == 6 || row == 7 || row == 8 || row == 9) {
+            // 过河的卒可以在任何位置
+          } else {
+            print('黑方卒位置不合法');
+            return false;
+          }
+        }
+      }
+
+      return true;
+    } catch (e) {
+      print('验证FEN时出错: $e');
+      return false;
+    }
   }
 }

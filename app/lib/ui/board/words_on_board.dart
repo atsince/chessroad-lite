@@ -6,11 +6,17 @@ import '../ruler.dart';
 class WordsOnBoard extends StatelessWidget {
   //
   final bool boardInversed;
-  const WordsOnBoard(this.boardInversed, {Key? key}) : super(key: key);
+  final bool miniMode;
+
+  const WordsOnBoard(this.boardInversed, {Key? key, this.miniMode = false}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
-    //
+    // 如果是mini模式，返回空白Widget
+    if (miniMode) {
+      return const SizedBox();
+    }
+
     final topSideColumns = boardInversed ? '一二三四五六七八九' : '１２３４５６７８９';
     final bottomSideColumns = boardInversed ? '９８７６５４３２１' : '九八七六五四三二一';
 
@@ -53,4 +59,10 @@ class WordsOnBoard extends StatelessWidget {
       ),
     );
   }
+}
+
+// 没有文字和标注的迷你棋盘Widget
+class MiniWordsOnBoard extends WordsOnBoard {
+  const MiniWordsOnBoard(bool boardInversed, {Key? key})
+      : super(boardInversed, key: key, miniMode: true);
 }

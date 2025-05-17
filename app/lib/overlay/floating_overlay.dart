@@ -965,7 +965,7 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
                                             ),
                                           )
                                         : Text(
-                                            _isEngineThinking ? '思考中...' : '点击获取提示',
+                                            _isEngineThinking ? '思考中...' : '',
                                             style: TextStyle(
                                               fontSize: 13 * _currentScale, // 减小字体
                                               color: Colors.grey[600],

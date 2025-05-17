@@ -74,7 +74,8 @@ class BattlePageState extends State<BattlePage>
 
     // final initBoard = profile['battlepage-init-board'] ?? Fen.defaultPosition;
     // final initBoard = '2ba1a3/3P4P/Cr2bk3/C1cNn1p1n/1r7/R1N1P4/3pp3P/8B/1c2A4/2B1KA3 w - - 0 1';
-    final initBoard = '4k4/4a4/2P1ba3/2p4r1/3P2R2/9/9/4B4/4A4/2BAK4 w - - 0 1';
+    // final initBoard = '4k4/4a4/2P1ba3/2p4r1/3P2R2/9/9/4B4/4A4/2BAK4 w - - 0 1';
+    final initBoard = '3aka3/4n4/2R1b4/4p4/9/9/5N3/9/9/9 w - - 0 1';
     final moveList = profile['battlepage-move-list'] ?? '';
     final boardInversed = profile['battlepage-board-inversed'] ?? false;
     _opponentHuman = profile['battlepage-oppo-human'] ?? false;

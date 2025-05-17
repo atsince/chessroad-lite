@@ -109,7 +109,8 @@ Widget createChessBoardMini(BuildContext context, GameScene scene,
     _additionPaddingH = (windowSize.width - width) / 2 + Ruler.kBoardMargin;
   }
 
-  final boardWidget = ThinkingBoardWidget(
+  // 对于迷你棋盘，设置自定义的ThinkingBoardWidget
+  final boardWidget = MiniThinkingBoardWidget(
     width - _paddingH * 2,
     onBoardTap,
     opponentHuman: opponentHuman,
