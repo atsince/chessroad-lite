@@ -26,8 +26,6 @@ class BoardWidget extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     //
-    prt('BoardWidget build...');
-
     final boardContainer = Container(
       width: width,
       height: height,
@@ -35,31 +33,32 @@ class BoardWidget extends StatelessWidget {
         borderRadius: BorderRadius.circular(5),
         color: GameColors.boardBackground,
       ),
-      child: Consumer<BoardState>(
-        builder: (context, board, child) {
-          print("Kevin 444 ${ (width - Ruler.kBoardPadding * 2) / 9 / 2 +
-              Ruler.kBoardPadding -
-              Ruler.kBoardDigitsTextFontSize / 2}");
-          return Stack(
-            children: <Widget>[
-              RepaintBoundary(
-                child: CustomPaint(
-                  painter: BoardPainter(width),
-                  child: Container(
-                    margin: EdgeInsets.symmetric(
-                      vertical: Ruler.kBoardPadding,
-                      horizontal: (width - Ruler.kBoardPadding * 2) / 9 / 2 +
-                          Ruler.kBoardPadding -
-                          Ruler.kBoardDigitsTextFontSize / 2,
+      child: RepaintBoundary(
+        child: Consumer<BoardState>(
+          builder: (context, board, child) {
+            return Stack(
+              children: <Widget>[
+                RepaintBoundary(
+                  child: CustomPaint(
+                    painter: BoardPainter(width),
+                    child: Container(
+                      margin: EdgeInsets.symmetric(
+                        vertical: Ruler.kBoardPadding,
+                        horizontal: (width - Ruler.kBoardPadding * 2) / 9 / 2 +
+                            Ruler.kBoardPadding -
+                            Ruler.kBoardDigitsTextFontSize / 2,
+                      ),
+                      child: WordsOnBoard(board.boardInversed),
                     ),
-                    child: WordsOnBoard(board.boardInversed),
                   ),
                 ),
-              ),
-              buildPiecesLayer(board, opponentHuman: opponentHuman),
-            ],
-          );
-        },
+                RepaintBoundary(
+                  child: buildPiecesLayer(board, opponentHuman: opponentHuman),
+                ),
+              ],
+            );
+          },
+        ),
       ),
     );
 

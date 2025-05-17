@@ -8,6 +8,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 import 'package:media_projection_screenshot/media_projection_screenshot.dart';
+import 'package:media_projection_screenshot/captured_image.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:http/http.dart' as http;
 import 'package:image/image.dart' as img;
@@ -43,8 +44,9 @@ class OverlayService {
   bool _isOverlayActive = false;
   bool _isCapturing = false;
   String _apiUrl = "http://49.233.44.201:39009/api/chess/detect";
-  Timer? _captureTimer;
   var screenShot2 = MediaProjectionScreenshot();
+  StreamSubscription? _captureStreamSubscription;
+  DateTime? _lastCaptureTime;
 
   final StreamController<Map<String, dynamic>> _dataController = StreamController<Map<String, dynamic>>.broadcast();
 
@@ -145,11 +147,21 @@ class OverlayService {
     switch(type) {
       case OverlayConstants.TYPE_TOGGLE_CAPTURE:
         // 切换捕获状态
-        if (_isCapturing) {
-          stopCapturing();
+        if (data.containsKey('isCapturing')) {
+          // 使用消息中的明确状态
+          bool requestedState = data['isCapturing'];
+          if (requestedState && !_isCapturing) {
+            startCapturing();
+          } else if (!requestedState && _isCapturing) {
+            stopCapturing();
+          }
         } else {
-          print("Kevin 666 overlay_service");
-          startCapturing();
+          // 老方式：直接切换状态
+          if (_isCapturing) {
+            stopCapturing();
+          } else {
+            startCapturing();
+          }
         }
         break;
 
@@ -179,6 +191,8 @@ class OverlayService {
     }
 
     _isCapturing = true;
+    _lastCaptureTime = null; // 重置上次捕获时间
+
     // 发送捕获开始状态消息
     _dataController.add({
       'type': 'capture_started',
@@ -189,19 +203,63 @@ class OverlayService {
       'message': '开始识别中...',
     });
 
-    // // 设置定时器，定期截屏
-    _captureTimer = Timer.periodic(Duration(seconds: intervalSeconds), (_) {
-      captureAndAnalyzeScreen();
-    });
+    try {
+      // 使用流式截屏持续捕获
+      final stream = await screenShot2.startCapture(fps:1);
+      if (stream != null) {
+        _captureStreamSubscription = stream.listen(
+          (data) async {
+            if (data != null && _isCapturing) {
+              final now = DateTime.now();
+              // 检查是否已过间隔时间
+              if (_lastCaptureTime == null || now.difference(_lastCaptureTime!).inSeconds >= intervalSeconds) {
+                _lastCaptureTime = now; // 更新上次捕获时间
 
-    // 立即执行第一次截屏
-    // await captureAndAnalyzeScreen();
+                try {
+                  final capturedImage = CapturedImage.fromMap(Map<String, dynamic>.from(data));
+                  if (capturedImage.bytes != null) {
+                    debugPrint('处理截屏数据 - ${now.toIso8601String()}');
+                    // 保存截屏到临时文件
+                    final tempFile = await _saveScreenshotToTemp(capturedImage.bytes);
+                    // 上传截屏到棋盘识别服务
+                    await _recognizeBoard(tempFile);
+                  }
+                } catch (e) {
+                  debugPrint('处理截屏数据失败: $e');
+                }
+              } else {
+                // 跳过这一帧，因为还没到处理间隔
+                debugPrint('跳过帧 - 距离上次处理: ${now.difference(_lastCaptureTime!).inSeconds}秒');
+              }
+            }
+          },
+          onError: (e) {
+            debugPrint('截屏流出错: $e');
+            showError('截屏出错: $e');
+          },
+          onDone: () {
+            debugPrint('截屏流结束');
+            if (_isCapturing) {
+              // 如果仍然处于捕获状态，但流结束了，尝试重新启动
+              startCapturing(intervalSeconds: intervalSeconds);
+            }
+          },
+        );
+      } else {
+        await showError('无法启动截屏流');
+        _isCapturing = false;
+      }
+    } catch (e) {
+      await showError('启动截屏出错: $e');
+      _isCapturing = false;
+    }
   }
 
   Future<void> stopCapturing() async {
-    _captureTimer?.cancel();
-    _captureTimer = null;
+    _captureStreamSubscription?.cancel();
+    _captureStreamSubscription = null;
     _isCapturing = false;
+    _lastCaptureTime = null;
 
     // 停止屏幕捕获
     try {
@@ -219,49 +277,6 @@ class OverlayService {
     await sendCommand(OverlayConstants.CMD_SHOW_ERROR, {
       'message': '识别已暂停',
     });
-  }
-
-  Future<void> captureAndAnalyzeScreen() async {
-    if (!_isCapturing) return;
-
-    try {
-      // 获取截屏
-      final Uint8List? screenshotBytes = await _captureScreen();
-      if (screenshotBytes == null) {
-        await showError('截屏失败');
-        return;
-      }
-
-      // 保存截屏到临时文件
-      final tempFile = await _saveScreenshotToTemp(screenshotBytes);
-
-      // 上传截屏到棋盘识别服务
-      await _recognizeBoard(tempFile);
-
-    } catch (e) {
-      await showError('截屏分析出错: $e');
-    }
-  }
-
-  Future<Uint8List?> _captureScreen() async {
-    try {
-      if (Platform.isAndroid) {
-        // 使用MediaProjectionScreenshot插件进行截屏
-        final capturedImage = await screenShot2.takeCapture();
-
-        if (capturedImage != null) {
-          return capturedImage.bytes;
-        } else {
-          debugPrint('截屏返回为空');
-          return null;
-        }
-      }
-      // iOS平台暂时返回模拟数据
-      return _createMockScreenshot();
-    } catch (e) {
-      debugPrint('截屏失败: $e');
-      return null;
-    }
   }
 
   Uint8List _createMockScreenshot() {
@@ -296,32 +311,34 @@ class OverlayService {
     try {
       await sendStatusUpdate('正在识别棋盘...');
 
-      // 上传识别棋盘
-      final result = await BoardRecognitionService.recognizeBoard(
-        imageFile,
-        _apiUrl,
-      );
+      final initBoard = '4k4/4a4/2P1ba3/2p4r1/3P2R2/9/9/4B4/4A4/2BAK4 w - - 0 1';
+       await updateBoard(initBoard, 'black');
+      // // 上传识别棋盘
+      // final result = await BoardRecognitionService.recognizeBoard(
+      //   imageFile,
+      //   _apiUrl,
+      // );
 
-      if (result.success && result.fen != null && result.fen!.isNotEmpty) {
-        // 成功识别棋盘
-        await sendStatusUpdate('棋盘识别成功，正在分析...');
+      // if (result.success && result.fen != null && result.fen!.isNotEmpty) {
+      //   // 成功识别棋盘
+      //   await sendStatusUpdate('棋盘识别成功，正在分析...');
 
-        // 更新当前FEN和走棋方
-        final parts = result.fen!.split(' ');
-        final String sideToMove = parts.length > 1 ? parts[1] : 'w';
-        final currentPlayer = sideToMove == 'w' ? 'red' : 'black';
-        print('FEN parts: $parts');
-        print('Side to move: $sideToMove');
-        print('Current player: $currentPlayer');
+      //   // 更新当前FEN和走棋方
+      //   final parts = result.fen!.split(' ');
+      //   final String sideToMove = parts.length > 1 ? parts[1] : 'w';
+      //   final currentPlayer = sideToMove == 'w' ? 'red' : 'black';
+      //   print('FEN parts: $parts');
+      //   print('Side to move: $sideToMove');
+      //   print('Current player: $currentPlayer');
 
-        // // 更新棋盘状态
-        await updateBoard(result.fen!, currentPlayer);
+      //   // // 更新棋盘状态
+      //   await updateBoard(result.fen!, currentPlayer);
 
-        // // 通知主应用请求引擎分析
-        // await requestEngineHint();
-      } else {
-        await showError(result.message ?? '棋盘识别失败');
-      }
+      //   // // 通知主应用请求引擎分析
+      //   // await requestEngineHint();
+      // } else {
+      //   await showError(result.message ?? '棋盘识别失败');
+      // }
     } catch (e) {
       await showError('棋盘识别过程出错: $e');
     }

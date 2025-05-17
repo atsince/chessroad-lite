@@ -115,14 +115,17 @@ Widget createChessBoardMini(BuildContext context, GameScene scene,
     opponentHuman: opponentHuman,
   );
 
-  return Container(
-    margin: EdgeInsets.symmetric(
-      horizontal: 0,
-      vertical:0,
+  return RepaintBoundary(
+    child: Container(
+      margin: const EdgeInsets.symmetric(
+        horizontal: 0,
+        vertical: 0,
+      ),
+      height: 200,
+      // 移除绿色背景，使用透明背景以减少重绘
+      // color: Colors.green,
+      child: boardWidget,
     ),
-    height: 200,
-    color:Colors.green,
-    child: boardWidget,
   );
 }
 Widget createChessBoard(BuildContext context, GameScene scene,

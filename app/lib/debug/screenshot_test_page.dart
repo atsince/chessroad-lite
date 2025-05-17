@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:isolate';
 import 'dart:typed_data';
@@ -51,8 +52,7 @@ class _ScreenshotTestPageState extends State<ScreenshotTestPage> {
       });
     }
   }
-
-  // 单次截屏
+  Timer? _captureTimer;
   Future<void> _takeSingleCapture() async {
     // 打印当前线程信息
     print('[Kevin 666 ${Isolate.current.debugName}] 开始单次截屏');
@@ -64,8 +64,13 @@ class _ScreenshotTestPageState extends State<ScreenshotTestPage> {
     try {
       // 尝试两种方式捕获屏幕
       try {
+_captureTimer?.cancel();
+         _captureTimer = Timer.periodic(Duration(seconds: 5), (_) async {
+      _capturedImage =  await  _screenshotPlugin.takeCapture();
+      print("Kevin 666_takeSingleCapture ");
+    });
         // 方式1: 不指定区域参数
-        _capturedImage = await _screenshotPlugin.takeCapture();
+        // _capturedImage = await _screenshotPlugin.takeCapture();
       } catch (e) {
         print("方式1捕获失败，尝试方式2: $e");
         // 方式2: 指定全屏区域
@@ -95,6 +100,54 @@ class _ScreenshotTestPageState extends State<ScreenshotTestPage> {
       });
     }
   }
+//   // 单次截屏
+//   Future<void> _takeSingleCapture() async {
+//     // 打印当前线程信息
+//     print('[Kevin 666 ${Isolate.current.debugName}] 开始单次截屏');
+//     setState(() {
+//       _statusText = "截屏中...";
+//       _displayBytes = null;
+//     });
+
+//     try {
+//       // 尝试两种方式捕获屏幕
+//       try {
+// _captureTimer?.cancel();
+//          _captureTimer = Timer.periodic(Duration(seconds: 5), (_) async {
+//       _capturedImage =  await  _screenshotPlugin.takeCapture();
+//       print("Kevin 666_takeSingleCapture ");
+//     });
+//         // 方式1: 不指定区域参数
+//         // _capturedImage = await _screenshotPlugin.takeCapture();
+//       } catch (e) {
+//         print("方式1捕获失败，尝试方式2: $e");
+//         // 方式2: 指定全屏区域
+//         _capturedImage = await _screenshotPlugin.takeCapture(
+//           x: 0,
+//           y: 0,
+//           width: -1, // 使用-1表示全屏宽度
+//           height: -1, // 使用-1表示全屏高度
+//         );
+//       }
+
+//       if (_capturedImage != null) {
+//         setState(() {
+//           _statusText = "截屏成功 - 宽: ${_capturedImage!.width}, 高: ${_capturedImage!.height}";
+//           _displayBytes = _capturedImage!.bytes;
+//         });
+//         // 保存图像到文件
+//         await _saveImageToFile(_capturedImage!.bytes);
+//       } else {
+//         setState(() {
+//           _statusText = "截屏失败 - 返回null";
+//         });
+//       }
+//     } catch (e) {
+//       setState(() {
+//         _statusText = "截屏出错: $e";
+//       });
+//     }
+//   }
 
   // 开始流式截屏
   Future<void> _startStreamCapture() async {

@@ -6,6 +6,7 @@ import 'package:chessroad/engine/hybrid_engine.dart';
 import 'package:chessroad/routes/board_recognition/board_recognition_page.dart';
 import 'package:chessroad/routes/main_menu/privacy_policy.dart';
 import 'package:chessroad/services/overlay_service.dart';
+import 'package:chessroad/services/simple_overlay_service.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
@@ -41,6 +42,10 @@ class MainMenuState extends State<MainMenu>
   String? _lastRecognizedFen; // 最近识别的FEN
   String? _lastEngineHint; // 最近的引擎提示
   DateTime? _lastUpdateTime; // 最后更新时间
+
+  // 添加简易悬浮窗状态
+  bool _isSimpleOverlayShown = false;
+  final SimpleOverlayService _simpleOverlayService = SimpleOverlayService();
 
   @override
   void initState() {
@@ -318,6 +323,26 @@ class MainMenuState extends State<MainMenu>
                 ),
               ),
             ),
+            // 添加简易悬浮窗按钮
+            TextButton(
+              onPressed: _toggleSimpleOverlay,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text('简易悬浮窗', style: menuItemStyle),
+                  const SizedBox(width: 8),
+                  Container(
+                    width: 12,
+                    height: 12,
+                    decoration: BoxDecoration(
+                      color: _isSimpleOverlayShown ? Colors.green : Colors.grey,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                ],
+              ),
+            ),
             const Expanded(child: SizedBox()),
             TextButton(
               onPressed: () => showReadme(context),
@@ -533,5 +558,16 @@ class MainMenuState extends State<MainMenu>
   // 格式化时间
   String _formatTime(DateTime time) {
     return '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}:${time.second.toString().padLeft(2, '0')}';
+  }
+
+  // 切换简易悬浮窗显示状态
+  void _toggleSimpleOverlay() async {
+    if (_isSimpleOverlayShown) {
+      await _simpleOverlayService.closeOverlay();
+      setState(() => _isSimpleOverlayShown = false);
+    } else {
+      final result = await _simpleOverlayService.showSimpleOverlay();
+      setState(() => _isSimpleOverlayShown = result);
+    }
   }
 }

@@ -61,6 +61,11 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
   // 存储引擎分析的走法数组
   List<Move> _engineMoves = [];
 
+  // 添加防抖相关变量
+  DateTime _lastUpdateTime = DateTime.now();
+  Timer? _stabilizeTimer;
+  bool _isDragging = false;
+
   // 引用OverlayService
   // final OverlayService _overlayService = OverlayService();
 
@@ -418,7 +423,7 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
         });
         return;
       }
-
+      print("Kevin 666 _requestEngineHint");
       // 设置引擎预先思考几步
       await HybridEngine().go(position, _engineCallback);
     } catch (e) {
@@ -617,15 +622,17 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
     // 发送切换捕获命令
     Map<String, dynamic> toggleData = {
       'type': OverlayConstants.TYPE_TOGGLE_CAPTURE,
-      'isCapturing': _isCapturing,
+      'isCapturing': !_isCapturing, // Invert the current state to send the new desired state
       'timestamp': DateTime.now().millisecondsSinceEpoch
     };
 
-    await _sendMessageToMain(toggleData);
+    // 提前更新UI状态，提供即时反馈
+    setState(() {
+      _isCapturing = !_isCapturing;
+      _statusMessage = _isCapturing ? '正在识别...' : '识别已暂停';
+    });
 
-    // 界面状态更新在收到消息处理结果后进行
-    print("Kevin 666 floating_overlay");
-    // _overlayService.startCapturing();
+    await _sendMessageToMain(toggleData);
   }
 
   void _closeOverlay() {
@@ -708,6 +715,63 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
     }
   }
 
+  // 添加防抖处理方法
+  void _handleMatrixUpdate(Matrix4 m, Matrix4 tm, Matrix4 sm, Matrix4 rm) {
+    // 处理缩放
+    double scale = sm.getMaxScaleOnAxis();
+    if (_currentScale * scale < _minScale) {
+      scale = _minScale / _currentScale;
+    } else if (_currentScale * scale > _maxScale) {
+      scale = _maxScale / _currentScale;
+    }
+
+    // 判断是否触发更新
+    bool isScaling = (scale - 1.0).abs() > 0.01;
+    bool isTranslating = false;
+
+    // 检查平移量是否足够大，避免微小变化触发更新
+    if (tm != Matrix4.identity()) {
+      double dx = tm.getTranslation().x;
+      double dy = tm.getTranslation().y;
+      isTranslating = dx.abs() > 1.0 || dy.abs() > 1.0;
+    }
+
+    bool shouldUpdate = isScaling || isTranslating;
+
+    if (shouldUpdate) {
+      // 标记正在拖动
+      _isDragging = true;
+      _lastUpdateTime = DateTime.now();
+
+      // 取消之前的稳定定时器
+      _stabilizeTimer?.cancel();
+
+      setState(() {
+        // 应用缩放
+        if (isScaling) {
+          _currentScale *= scale;
+          _matrix.multiply(Matrix4.diagonal3Values(scale, scale, 1.0));
+        }
+
+        // 应用平移
+        if (isTranslating) {
+          _matrix.multiply(tm);
+        }
+
+        _notifier.value = _matrix.clone();
+      });
+
+      // 设置定时器，当用户停止操作一段时间后，标记为非拖动状态
+      _stabilizeTimer = Timer(const Duration(milliseconds: 300), () {
+        if (DateTime.now().difference(_lastUpdateTime).inMilliseconds >= 300) {
+          setState(() {
+            _isDragging = false;
+          });
+        }
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return ChangeNotifierProvider.value(
@@ -715,24 +779,14 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
       child: Stack(
         children: [
           MatrixGestureDetector(
-            onMatrixUpdate: (Matrix4 m, Matrix4 tm, Matrix4 sm, Matrix4 rm) {
-              // 只应用缩放变换，不应用旋转
-              // 将缩放限制在最小和最大范围内
-              double scale = sm.getMaxScaleOnAxis();
-              if (_currentScale * scale < _minScale) {
-                scale = _minScale / _currentScale;
-              } else if (_currentScale * scale > _maxScale) {
-                scale = _maxScale / _currentScale;
-              }
-
-              setState(() {
-                _currentScale *= scale;
-                _matrix.multiply(Matrix4.diagonal3Values(scale, scale, 1.0));
-                _notifier.value = _matrix.clone();
-              });
-            },
+            clipChild: false,
+            focalPointAlignment: Alignment.center,
+            shouldRotate: false, // 禁用旋转
+            shouldScale: true,   // 允许缩放
+            shouldTranslate: true, // 允许平移
+            onMatrixUpdate: _handleMatrixUpdate,
             child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
+              duration: const Duration(milliseconds: 100),
               width: _currentWidth,
               height: _currentHeight,
               decoration: BoxDecoration(
@@ -1024,6 +1078,9 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
     } catch (_) {
       // 忽略
     }
+
+    // 取消定时器
+    _stabilizeTimer?.cancel();
 
     super.dispose();
   }

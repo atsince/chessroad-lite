@@ -300,7 +300,7 @@ class MediaProjectionScreenshotPlugin : FlutterPlugin, MethodCallHandler, EventC
       return
     }
 
-    Log.i(LOG_TAG, "Taking single capture")
+    Log.i(LOG_TAG, "Kevin 666 takeCapture！ this = ${System.identityHashCode(this)}")
 
     if (mediaProjection == null) {
       result.error(LOG_TAG, "Must request permission before take capture", null)
@@ -350,17 +350,17 @@ class MediaProjectionScreenshotPlugin : FlutterPlugin, MethodCallHandler, EventC
           virtualDisplay?.release()
           imageReader.close()
 
-          val region = call.arguments as Map<*, *>?
-          region?.let {
-            val x = it["x"] as Int? ?: 0
-            val y = it["y"] as Int? ?: 0
-            val w = it["width"] as Int?
-            val h = it["height"] as Int?
+          // val region = call.arguments as Map<*, *>?
+          // region?.let {
+          //   val x = it["x"] as Int? ?: 0
+          //   val y = it["y"] as Int? ?: 0
+          //   val w = it["width"] as Int?
+          //   val h = it["height"] as Int?
 
-            if (w != null && h != null && w > 0 && h > 0) {
-              bitmap = bitmap.crop(x + padding / 2, y, w, h)
-            }
-          }
+          //   if (w != null && h != null && w > 0 && h > 0) {
+          //     bitmap = bitmap.crop(x + padding / 2, y, w, h)
+          //   }
+          // }
 
           val outputStream = ByteArrayOutputStream()
           bitmap.compress(Bitmap.CompressFormat.PNG, 100, outputStream)
@@ -376,7 +376,7 @@ class MediaProjectionScreenshotPlugin : FlutterPlugin, MethodCallHandler, EventC
               "format" to Bitmap.Config.ARGB_8888.toString(),
               "pixelStride" to pixelStride,
               "rowStride" to rowStride,
-              "nv21" to getYV12(bitmap.width, bitmap.height, bitmap),
+              // "nv21" to getYV12(bitmap.width, bitmap.height, bitmap),
               "time" to System.currentTimeMillis(),
               "queue" to 1,
             )

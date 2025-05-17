@@ -11,10 +11,15 @@ class PiecesLayer extends StatefulWidget {
   State createState() => _PiecesLayerState();
 }
 
-class _PiecesLayerState extends State<PiecesLayer> {
+class _PiecesLayerState extends State<PiecesLayer> with SingleTickerProviderStateMixin {
   //
   @override
+  bool get wantKeepAlive => true;
+
+  @override
   Widget build(BuildContext context) {
-    return widget.layoutParams.buildPiecesLayout(context);
+    return RepaintBoundary(
+      child: widget.layoutParams.buildPiecesLayout(context),
+    );
   }
 }

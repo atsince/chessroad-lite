@@ -6,6 +6,7 @@ import 'dart:convert';
 import 'package:chessroad/config/local_data.dart';
 import 'package:chessroad/engine/hybrid_engine.dart';
 import 'package:chessroad/overlay/floating_overlay.dart';
+import 'package:chessroad/overlay/simple_floating_widget.dart';
 import 'package:chessroad/services/overlay_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -25,14 +26,15 @@ void main() async {
 
   debugPrint('运行模式: $kReleaseMode');
 
-
-  // 启动悬浮窗入口点
+  // 检查是否为悬浮窗模式
   final isOverlayActive = await FlutterOverlayWindow.isActive();
+
   if (isOverlayActive) {
+    // 悬浮窗模式：显示简易悬浮窗组件
     runApp(
       const MaterialApp(
         debugShowCheckedModeBanner: false,
-        home: FloatingOverlay(),
+        home: SimpleFloatingWidget(),
       ),
     );
     return;
@@ -54,6 +56,22 @@ void main() async {
 
   // 启动应用
   runApp(const ChessRoadApp());
+}
+
+// 简易悬浮窗入口点
+@pragma("vm:entry-point")
+void overlayMain2() {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  debugPrint('简易悬浮窗入口点被触发');
+
+  // 运行悬浮窗UI
+  runApp(
+    const MaterialApp(
+      debugShowCheckedModeBanner: false,
+      home: SimpleFloatingWidget(),
+    ),
+  );
 }
 
 // Overlay entry point
