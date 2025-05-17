@@ -217,13 +217,22 @@ class MediaProjectionScreenshotPlugin : FlutterPlugin, MethodCallHandler, EventC
 
       mImageReader!!.setOnImageAvailableListener({ reader ->
         try {
+
+
+
           val image = reader.acquireLatestImage()
           if (image == null) {
             Log.w(LOG_TAG, "Acquired image is null")
             return@setOnImageAvailableListener
           }
 
-          val start = System.currentTimeMillis()
+
+
+
+ // 控制速率
+ if (fps == 0 || System.currentTimeMillis() - processingTime.get() >= 1000 / fps) {
+
+  val start = System.currentTimeMillis()
 
           val planes = image.planes
           val buffer = planes[0].buffer
@@ -237,8 +246,6 @@ class MediaProjectionScreenshotPlugin : FlutterPlugin, MethodCallHandler, EventC
 
           image.close()
 
-          // 控制速率
-          if (fps == 0 || System.currentTimeMillis() - processingTime.get() >= 1000 / fps) {
             processingTime.set(System.currentTimeMillis())
             region?.let { params ->
               val x = params["x"] as Int?
@@ -272,6 +279,8 @@ class MediaProjectionScreenshotPlugin : FlutterPlugin, MethodCallHandler, EventC
 
             val ts = System.currentTimeMillis() - start
             Log.i(LOG_TAG, "n = \t${queue}, ts = $ts\t, outputStream.size = ${outputStream.size()}")
+          }else{
+            image.close()
           }
         } catch (e: Exception) {
           Log.e(LOG_TAG, "Error processing image: ${e.message}")

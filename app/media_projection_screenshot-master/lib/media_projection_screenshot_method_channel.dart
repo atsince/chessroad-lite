@@ -37,6 +37,11 @@ class MethodChannelMediaProjectionScreenshot extends MediaProjectionScreenshotPl
         'y': y,
         'width': width,
         'height': height,
+        'fps': fps,
+      };
+    }else{
+      data = {
+        'fps': fps,
       };
     }
     return await methodChannel.invokeMethod('startCapture', data);

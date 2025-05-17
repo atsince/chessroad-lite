@@ -232,13 +232,13 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
               }
 
               // 更新引擎走法箭头
-              // if (event.containsKey('enginePV')) {
-              //   _updateEnginePV(event['enginePV']);
-              // } else {
-              //   // 自动请求引擎提示
-              //   print("Kevin 666 CMD_UPDATE_BOARD request hint");
-              //   _requestEngineHint();
-              // }
+              if (event.containsKey('enginePV')) {
+                _updateEnginePV(event['enginePV']);
+              } else {
+                // 自动请求引擎提示
+                print("Kevin 666 CMD_UPDATE_BOARD request hint");
+                _requestEngineHint();
+              }
 
               _statusMessage = '最近识别: ${_formatTime(_lastCaptureTime!)}';
             });
