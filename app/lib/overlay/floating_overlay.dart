@@ -78,13 +78,15 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
     _boardState = BoardState();
     _boardState.load(_boardFen, notify: true);
 
-    // 初始化引擎
-
-     Future.delayed(Duration(microseconds: 1),() async{
+    // 初始化引擎 - 使用Future.delayed确保UI初始化完成后再启动引擎
+    Future.delayed(Duration(milliseconds: 300), () async {
+      try {
         await HybridEngine().startup();
-        await  HybridEngine().newGame();
-     });
-
+        await HybridEngine().newGame();
+      } catch (e) {
+        print('引擎初始化失败: $e');
+      }
+    });
 
     // 设置跨Isolate通信
     _setupOverlayIsolateReceiver();
@@ -413,10 +415,12 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
       return;
     }
 
+    // 只更新分析状态，不清除已有的棋盘箭头
     setState(() {
       _isEngineThinking = true;
-      _engineHint = null;
-      _engineMoves = []; // 清空之前的走法
+      // 保留 _engineHint 和 _engineMoves，这样在分析过程中棋盘上的箭头不会消失
+      // _engineHint = null;
+      // _engineMoves = [];
     });
 
     print('请求引擎提示，走棋方: ${_currentPlayer == 'red' ? '红方' : '黑方'}');
@@ -424,7 +428,14 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
     try {
       // 先停止任何正在进行的引擎分析
       await _stopPonder();
-      await Future.delayed(const Duration(seconds: 1));
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      // 重置引擎状态，避免状态混乱导致崩溃
+      await HybridEngine().stop();
+      await Future.delayed(const Duration(milliseconds: 500));
+      await HybridEngine().newGame();
+      await Future.delayed(const Duration(milliseconds: 300));
+
       final position = Fen.positionFromFen(_boardFen);
       if (position == null) {
         print('无法从FEN创建棋局位置');
@@ -435,7 +446,6 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
       }
 
       print("Kevin 666 HybridEngine().go");
-      // 设置引擎预先思考几步
       await HybridEngine().go(position, _engineCallback);
     } catch (e) {
       print('请求引擎提示时出错: $e');
@@ -485,7 +495,7 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
     final resp = er.response;
 
     if (resp is EngineInfo) {
-      // 更新引擎信息
+      // 保存最新的引擎分析信息，但不立即更新界面上的箭头
       _boardState.engineInfo = resp;
 
       final score = resp.tokens['score'];
@@ -503,30 +513,7 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
         }
       }
 
-      // 保存引擎分析的走法路线，最多2步
-      var pvs = resp.pvs;
-      if (pvs.isNotEmpty) {
-        setState(() {
-          _engineMoves = [];
-          int count = 0;
-          for (final moveStr in pvs) {
-            if (count >= 2) break;
-            try {
-              _engineMoves.add(Move.fromEngineMove(moveStr));
-              count++;
-            } catch (e) {
-              print('解析走法时出错: $e');
-            }
-          }
-        });
-
-        // 更新棋盘显示
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) {
-            _setupEngineMovesToDisplay(_boardState, _engineMoves);
-          }
-        });
-      }
+      // 分析中不更新棋盘显示，等待最终结果
     } else if (resp is Bestmove) {
       print('引擎最佳着法: ${resp.bestmove}');
 
@@ -553,7 +540,7 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
             _isEngineThinking = false;
           });
 
-          // 立即更新棋盘显示
+          // 现在分析完成，更新棋盘显示
           if (mounted) {
             _setupEngineMovesToDisplay(_boardState, newMoves);
           }
@@ -594,7 +581,7 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
         });
       }
     } else if (resp is NoBestmove) {
-      // 处理无最佳着法的情况
+      // 处理无最佳着法的情况，但保留现有的箭头
       setState(() {
         _isEngineThinking = false;
         _engineHint = "无法找到有效走法";
@@ -640,8 +627,11 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
     });
 
     // 重置引擎状态
-    _stopEngine().then((_) {
-      HybridEngine().newGame();
+    _stopPonder().then((_) async {
+      await Future.delayed(const Duration(milliseconds: 500));
+      await HybridEngine().stop();
+      await Future.delayed(const Duration(milliseconds: 500));
+      await HybridEngine().newGame();
 
       // 切换后自动请求新走法提示
       _requestEngineHint();
@@ -802,24 +792,32 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
     }
   }
 
-  // 停止引擎的思考并清理相关资源
-  Future<void> _stopEngine() async {
-    await HybridEngine().stop();
-    setState(() {
+  // 停止后台思考并释放引擎资源
+  Future<void> _stopPonder() async {
+    try {
+      await HybridEngine().stopPonder();
       _boardState.engineInfo = null;
       _boardState.bestmove = null;
-      if (_isEngineThinking) {
-        _isEngineThinking = false;
-      }
-    });
+    } catch (e) {
+      print('停止后台思考出错: $e');
+    }
   }
 
-  Future<void> _stopPonder() async {
-    await HybridEngine().stopPonder();
-    _boardState.engineInfo = null;
-    _boardState.bestmove = null;
+  // 停止引擎的思考并清理相关资源
+  Future<void> _stopEngine() async {
+    try {
+      await _stopPonder();
+      await Future.delayed(const Duration(milliseconds: 300));
+      await HybridEngine().stop();
+      setState(() {
+        if (_isEngineThinking) {
+          _isEngineThinking = false;
+        }
+      });
+    } catch (e) {
+      print('停止引擎思考出错: $e');
+    }
   }
-
 
   @override
   Widget build(BuildContext context) {
@@ -1121,8 +1119,12 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
     // 停止捕获并清理资源
     _stopCapturing();
 
-    // 停止引擎
-    _stopEngine();
+    // 停止引擎 - 使用try-catch避免异常影响析构
+    try {
+      _stopEngine();
+    } catch (e) {
+      print('dispose时停止引擎出错: $e');
+    }
 
     // 清理IsolateNameServer相关资源
     _overlayReceivePort?.close();
