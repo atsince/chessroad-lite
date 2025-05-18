@@ -111,7 +111,8 @@ Widget createChessBoardMini(BuildContext context, GameScene scene,
 
   // 对于迷你棋盘，设置自定义的ThinkingBoardWidget
   final boardWidget = MiniThinkingBoardWidget(
-    width - _paddingH * 2,
+    // width - _paddingH * 2,
+    width - _paddingH * 2+ 30,
     onBoardTap,
     opponentHuman: opponentHuman,
   );
@@ -122,9 +123,9 @@ Widget createChessBoardMini(BuildContext context, GameScene scene,
         horizontal: 0,
         vertical: 0,
       ),
-      height: 200,
+      height: 280,
       // 移除绿色背景，使用透明背景以减少重绘
-      // color: Colors.green,
+      color: Colors.green,
       child: boardWidget,
     ),
   );

@@ -48,6 +48,8 @@ class MiniThinkingBoardWidget extends ThinkingBoardWidget {
 
   @override
   Widget build(BuildContext context) {
+
+    print('height: $height');
     final boardContainer = Container(
       width: width,
       height: height,
@@ -64,12 +66,12 @@ class MiniThinkingBoardWidget extends ThinkingBoardWidget {
                   child: CustomPaint(
                     painter: BoardPainter(width),
                     child: Container(
-                      margin: EdgeInsets.symmetric(
-                        vertical: Ruler.kBoardPadding,
-                        horizontal: (width - Ruler.kBoardPadding * 2) / 9 / 2 +
-                            Ruler.kBoardPadding -
-                            Ruler.kBoardDigitsTextFontSize / 2,
-                      ),
+                      // margin: EdgeInsets.symmetric(
+                      //   vertical: Ruler.kBoardPadding,
+                      //   horizontal: (width - Ruler.kBoardPadding * 2) / 9 / 2 +
+                      //       Ruler.kBoardPadding -
+                      //       Ruler.kBoardDigitsTextFontSize / 2,
+                      // ),
                       // 使用MiniWordsOnBoard，不显示文字
                       child: MiniWordsOnBoard(board.boardInversed),
                     ),

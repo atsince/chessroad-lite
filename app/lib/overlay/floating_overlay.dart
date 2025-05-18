@@ -48,7 +48,7 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
 
   // 基础尺寸，缩放基于此尺寸
   final double _baseWidth = 500.0;
-  final double _baseHeight = 800.0;
+  final double _baseHeight = 600.0;
 
   double get _currentWidth => _baseWidth * _currentScale;
   double get _currentHeight => _baseHeight * _currentScale;
@@ -1055,29 +1055,7 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
                               Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  // 切换显示箭头
-                                  IconButton(
-                                    iconSize: 16 * _currentScale, // 从18减小到16
-                                    padding: EdgeInsets.all(1 * _currentScale), // 减小padding
-                                    constraints: BoxConstraints(),
-                                    icon: Icon(
-                                      _showEngineArrows ? Icons.arrow_forward : Icons.arrow_forward_outlined,
-                                      color: _showEngineArrows ? Colors.blue : Colors.grey,
-                                    ),
-                                    onPressed: () {
-                                      setState(() {
-                                        _showEngineArrows = !_showEngineArrows;
 
-                                        // 更新LocalData，确保ThinkingBoardLayout能正确显示或隐藏箭头
-                                        LocalData().thinkingArrowEnabled.value = _showEngineArrows;
-
-                                        // 如果切换到显示，但没有引擎提示，重新请求
-                                        if (_showEngineArrows && _engineHint == null && !_isEngineThinking) {
-                                          _requestEngineHint();
-                                        }
-                                      });
-                                    },
-                                  ),
                                   Material(
                                     color: Colors.transparent,
                                     child: InkWell(
@@ -1091,10 +1069,7 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
                                       },
                                       borderRadius: BorderRadius.circular(4 * _currentScale),
                                       child: Container(
-                                        padding: EdgeInsets.symmetric(
-                                          horizontal: 6 * _currentScale, // 减小padding
-                                          vertical: 2 * _currentScale,   // 减小padding
-                                        ),
+
                                         decoration: BoxDecoration(
                                           color: Colors.blue,
                                           borderRadius: BorderRadius.circular(4 * _currentScale),
@@ -1111,24 +1086,14 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
                                                     color: Colors.white,
                                                   ),
                                                 ),
-                                                SizedBox(width: 3 * _currentScale), // 从4减小到3
-                                                Text(
-                                                  '思考中',
-                                                  style: TextStyle(
-                                                    color: Colors.white,
-                                                    fontSize: 11 * _currentScale, // 从12减小到11
-                                                  ),
-                                                ),
+
+
                                               ],
                                             )
                                           : Row(
                                               mainAxisSize: MainAxisSize.min,
                                               children: [
-                                                Icon(
-                                                  Icons.flash_on,
-                                                  size: 12 * _currentScale, // 从14减小到12
-                                                  color: Colors.white,
-                                                ),
+
                                                 SizedBox(width: 2 * _currentScale),
                                                 Text(
                                                   '提示',  // 简化文字

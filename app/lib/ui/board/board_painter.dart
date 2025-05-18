@@ -23,6 +23,7 @@ class BoardPainter extends CustomPainter {
       squareWidth,
       offsetX: Ruler.kBoardPadding + squareWidth / 2,
       offsetY: Ruler.kBoardPadding + Ruler.kBoardDigitsHeight + squareWidth / 2,
+      // offsetY: 0,
     );
   }
 

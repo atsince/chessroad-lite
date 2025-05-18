@@ -11,7 +11,8 @@ class Ruler {
 
   static const kBoardMargin = 10.0;
   static const kBoardPadding = 5.0;
-  static const kBoardDigitsHeight = 20.0;
+  // static const kBoardDigitsHeight = 20.0;
+  static const kBoardDigitsHeight = 0.0;
   static const kBoardDigitsTextFontSize = 18.0;
 
   static const kPuzzleBookMargin = 16.0;

@@ -82,7 +82,7 @@ class PieceWidget extends StatelessWidget {
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(diameter / 2),
           color: bgColor,
-          border: Border.all(color: borderColor, width: 2),
+          // border: Border.all(color: borderColor, width: 2),
           boxShadow: const [
             BoxShadow(
               color: Colors.black54,

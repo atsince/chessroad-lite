@@ -210,7 +210,7 @@ class OverlayService {
     }
   }
 
-  Future<void> startCapturing({int intervalSeconds = 10}) async {
+  Future<void> startCapturing({int intervalSeconds = 4}) async {
     if (_isCapturing) return;
 
     final hasPermission = await requestScreenCapturePermission();
@@ -422,7 +422,7 @@ class OverlayService {
 
     try {
       await FlutterOverlayWindow.showOverlay(
-        height: 800,
+        height: 600,
         width: 500,
         alignment: OverlayAlignment.topLeft,
         flag: OverlayFlag.defaultFlag,

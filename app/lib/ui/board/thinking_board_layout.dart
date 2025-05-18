@@ -40,7 +40,7 @@ class _PiecesLayoutState extends State<ThinkingBoardLayout> {
 
       moves.addAll(pvs.map((move) => Move.fromEngineMove(move)));
     }
-
+    //棋子layout
     final layout = widget.layoutParams.buildPiecesLayout(context);
 
     return Stack(children: [
