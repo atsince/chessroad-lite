@@ -81,6 +81,13 @@ void overlayMain() async {
 
   // 设置跨Isolate通信
   await _setupOverlayCommunication();
+  await LocalData().load();
+  // 确保始终显示箭头
+  LocalData().thinkingArrowEnabled.value = true;
+
+
+  await HybridEngine().startup();
+  await HybridEngine().newGame();
 
   print('启动悬浮窗应用');
   runApp(const MaterialApp(

@@ -3,7 +3,8 @@ import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:pikafish_engine/pikafish_engine.dart';
+import 'package:pikafish_engine2/pikafish_engine.dart';
+
 
 import '../cchess/position.dart';
 import '../common/prt.dart';

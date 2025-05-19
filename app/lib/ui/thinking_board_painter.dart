@@ -8,15 +8,15 @@ import 'ruler.dart';
 class ThinkingBoardPainter extends CustomPainter {
   //
   static const pathColors = [
-    Color(0xAAFF7777),
-    Color(0x77777777),
+    Color(0xAAFF5555),
+    Color(0xAA5555FF),
     Color(0x77777777),
     Color(0x77777777),
     Color(0x77777777),
   ];
   static const indicatorColors = [
-    Color(0xAAFF7777),
-    Color(0x77777777),
+    Color(0xAAFF5555),
+    Color(0xAA5555FF),
     Color(0x77777777),
     Color(0x77777777),
     Color(0x77777777),
@@ -107,6 +107,7 @@ class ThinkingBoardPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) {
-    return false;
+    // 始终返回true确保每次都重绘箭头
+    return true;
   }
 }

@@ -210,7 +210,7 @@ class OverlayService {
     }
   }
 
-  Future<void> startCapturing({int intervalSeconds = 4}) async {
+  Future<void> startCapturing({int intervalSeconds = 1}) async {
     if (_isCapturing) return;
 
     final hasPermission = await requestScreenCapturePermission();
@@ -345,48 +345,74 @@ class OverlayService {
     await file.writeAsBytes(bytes);
     return file;
   }
+     // 20个残局棋盘
+      final List<String> endgamePositions = [
+        '4k4/4a4/2P1ba3/2p4r1/3P2R2/9/9/4B4/4A4/2BAK4 w - - 0 1',
+        '2bak4/4a4/4b4/9/9/2B6/9/3AB4/4A4/4K4 w - - 0 1',
+        '4ka3/4a4/4b4/9/9/9/9/4B4/4A4/3AK4 w - - 0 1',
+        '3ak4/9/3ab4/9/9/9/9/4B4/4A4/4K4 w - - 0 1',
+        '3k5/4P4/4b4/9/9/9/9/9/9/4K4 w - - 0 1',
+        '4k4/4a4/4ba3/9/9/9/9/4B4/4A4/2BAK4 w - - 0 1',
+        '3ak4/9/4b4/9/9/9/9/4B4/4A4/4K4 w - - 0 1',
+        '5k3/4P4/9/9/9/9/9/9/9/4K4 w - - 0 1',
+        '3k5/9/3N5/9/9/9/9/9/9/4K4 w - - 0 1',
+        '4k4/4a4/4b4/9/9/9/9/4B4/4A4/4K4 w - - 0 1',
+        '3ak4/9/4b4/4N4/9/9/9/9/9/4K4 w - - 0 1',
+        '5k3/4P4/4b4/9/9/9/9/9/9/4K4 w - - 0 1',
+        '3k5/9/3C5/9/9/9/9/9/9/4K4 w - - 0 1',
+        '4k4/4a4/4b4/9/9/9/9/4B4/4A4/3AK4 w - - 0 1',
+        '3ak4/9/4b4/4C4/9/9/9/9/9/4K4 w - - 0 1',
+        '4k4/4P4/4b4/9/9/9/9/9/9/4K4 w - - 0 1',
+        '3k5/9/3R5/9/9/9/9/9/9/4K4 w - - 0 1',
+        '4k4/4a4/4b4/9/9/9/9/4B4/4A4/2BAK4 w - - 0 1',
+        '3ak4/9/4b4/4R4/9/9/9/9/9/4K4 w - - 0 1',
+        '4k4/4a4/4b4/9/9/9/9/4B4/4A4/4K4 w - - 0 1'
+      ];
 
   Future<void> _recognizeBoard(File imageFile) async {
     try {
       await sendStatusUpdate('正在识别棋盘...');
 
-      // final initBoard = '4k4/4a4/2P1ba3/2p4r1/3P2R2/9/9/4B4/4A4/2BAK4 w - - 0 1';
-      //  await updateBoard(initBoard, 'black');
-      // 上传识别棋盘
-      final result = await BoardRecognitionService.recognizeBoard(
-        imageFile,
-        _apiUrl,
-      );
 
-      if (result.success && result.fen != null && result.fen!.isNotEmpty) {
-        // 成功识别棋盘
-        await sendStatusUpdate('棋盘识别成功，正在验证...');
-
-        // 验证FEN是否符合棋理
-        final bool isValidFen = validateFen(result.fen!);
-
-        if (isValidFen) {
-          await sendStatusUpdate('棋盘验证成功，正在分析...');
-
-          // 更新当前FEN和走棋方
-          final parts = result.fen!.split(' ');
-          final String sideToMove = parts.length > 1 ? parts[1] : 'w';
-          final currentPlayer = sideToMove == 'w' ? 'red' : 'black';
-          print('FEN parts: $parts');
-          print('Side to move: $sideToMove');
-          print('Current player: $currentPlayer');
-
-          // 更新棋盘状态
-          await updateBoard(result.fen!, currentPlayer);
-
-          // // 通知主应用请求引擎分析
-          // await requestEngineHint();
-        } else {
-          await showError('棋盘布局无效，请确保棋子摆放符合规则');
-        }
-      } else {
-        await showError(result.message ?? '棋盘识别失败');
-      }
+      // 随机选择一个残局
+      final random = Random();
+      final initBoard = endgamePositions[random.nextInt(endgamePositions.length)];
+       await updateBoard(initBoard, 'black');
+      // // 上传识别棋盘
+      // final result = await BoardRecognitionService.recognizeBoard(
+      //   imageFile,
+      //   _apiUrl,
+      // );
+      //
+      // if (result.success && result.fen != null && result.fen!.isNotEmpty) {
+      //   // 成功识别棋盘
+      //   await sendStatusUpdate('棋盘识别成功，正在验证...');
+      //
+      //   // 验证FEN是否符合棋理
+      //   final bool isValidFen = validateFen(result.fen!);
+      //
+      //   if (isValidFen) {
+      //     await sendStatusUpdate('棋盘验证成功，正在分析...');
+      //
+      //     // 更新当前FEN和走棋方
+      //     final parts = result.fen!.split(' ');
+      //     final String sideToMove = parts.length > 1 ? parts[1] : 'w';
+      //     final currentPlayer = sideToMove == 'w' ? 'red' : 'black';
+      //     print('FEN parts: $parts');
+      //     print('Side to move: $sideToMove');
+      //     print('Current player: $currentPlayer');
+      //
+      //     // 更新棋盘状态
+      //     await updateBoard(result.fen!, currentPlayer);
+      //
+      //     // // 通知主应用请求引擎分析
+      //     // await requestEngineHint();
+      //   } else {
+      //     await showError('棋盘布局无效，请确保棋子摆放符合规则');
+      //   }
+      // } else {
+      //   await showError(result.message ?? '棋盘识别失败');
+      // }
     } catch (e) {
       await showError('棋盘识别过程出错: $e');
     }
