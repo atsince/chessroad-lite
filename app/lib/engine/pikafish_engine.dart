@@ -3,7 +3,8 @@ import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:pikafish_engine2/pikafish_engine.dart';
+import 'package:pikafish_engine/pikafish_engine.dart';
+// import 'package:pikafish_engine2/pikafish_engine.dart';
 
 
 import '../cchess/position.dart';
@@ -82,6 +83,11 @@ class PikafishEngine {
     //
     this.callback = callback;
 
+    if(this.callback == null){
+        print('Kevin 666 333334444callback 引擎开始分析，当前状态: $_state');
+    }
+    print('Kevin 666 333334444callback 引擎开始分析，当前状态: $_state');
+
     final pos = position.lastCapturedPosition;
     final moves = position.movesAfterLastCaptured;
 
@@ -104,6 +110,7 @@ class PikafishEngine {
       Position position, EngineCallback callback, String ponder) async {
     //
     this.callback = callback;
+    prt('##### goPonder: $ponder');
 
     final pos = position.lastCapturedPosition;
     final moves = position.movesAfterLastCaptured;
@@ -155,6 +162,7 @@ class PikafishEngine {
 
   Future<void> stop({removeCallback = true}) async {
     //
+    print("Kevin stop");
     if (_state != EngineState.free && _state != EngineState.ready) {
       if (removeCallback) callback = null;
       _engine.stdin = 'stop';
@@ -180,14 +188,21 @@ class PikafishEngine {
     _subscription = _engine.stdout.listen((line) {
       //
       prt('engine=> $line');
-      if (callback == null) return;
+         print('Kevin 666 3333callback 引擎开始分析，当前状态: $_state');
+      if (callback == null) {
+          prt('callback is null');
+          return;
+      }
 
       if (line.startsWith('info')) {
+        print('引擎返回info信息: $line');
         callback!(EngineResponse(EngineType.pikafish, EngineInfo.parse(line)));
       } else if (line.startsWith('bestmove')) {
+        print('引擎返回最佳着法: $line');
         callback!(EngineResponse(EngineType.pikafish, Bestmove.parse(line)));
         _state = EngineState.ready;
       } else if (line.startsWith('nobestmove')) {
+        print('引擎返回无最佳着法');
         callback!(EngineResponse(EngineType.pikafish, NoBestmove()));
         _state = EngineState.ready;
       }

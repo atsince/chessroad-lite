@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'dart:math';
-import 'package:chessroad/engine/pikafish_engine.dart';
+// import 'package:chessroad/engine/pikafish_engine.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 import 'package:matrix_gesture_detector/matrix_gesture_detector.dart';
@@ -15,11 +15,11 @@ import '../ui/build_utils.dart';
 import '../ui/ruler.dart';
 import '../cchess/cc_fen.dart';
 import '../cchess/move_name.dart';
-import '../engine/engine.dart';
+// import '../engine/engine.dart';
 import '../cchess/cc_base.dart';
 import '../config/local_data.dart';
-import '../engine/hybrid_engine.dart'; // 添加引擎导入
-import '../services/overlay_service.dart'; // 导入常量定义
+// import '../engine/hybrid_engine.dart'; // 添加引擎导入
+import '../services/overlay_service.dart'; // 导入常量和服务定义
 
 class FloatingOverlay extends StatefulWidget {
   const FloatingOverlay({Key? key}) : super(key: key);
@@ -71,9 +71,6 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
   // 位置追踪相关
   Timer? _positionReportTimer;
 
-  // 引用OverlayService
-  // final OverlayService _overlayService = OverlayService();
-
   @override
   void initState() {
     super.initState();
@@ -88,15 +85,13 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
     _boardState = BoardState();
     _boardState.load(_boardFen, notify: true);
 
-    // 初始化引擎 - 使用Future.delayed确保UI初始化完成后再启动引擎
-    // Future.delayed(Duration(milliseconds: 300), () async {
-    //   try {
-    //     await HybridEngine().startup();
-    //     await HybridEngine().newGame();
-    //   } catch (e) {
-    //     print('引擎初始化失败: $e');
-    //   }
-    // });
+    // 将BoardState传递给服务层（通过消息）
+    _sendMessageToMain({
+      'type': 'set_current_position',
+      'fen': _boardFen,
+      'player': _currentPlayer,
+      'timestamp': DateTime.now().millisecondsSinceEpoch
+    });
 
     // 设置跨Isolate通信
     _setupOverlayIsolateReceiver();
@@ -142,13 +137,13 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
           try {
             final data = jsonDecode(message);
             if (data is Map) {
-              _handleOverlayEvent(Map<String, dynamic>.from(data));
+              _handleMessage(Map<String, dynamic>.from(data));
             }
           } catch (e) {
             print('解析主应用消息失败: $e');
           }
         } else if (message is Map) {
-          _handleOverlayEvent(Map<String, dynamic>.from(message));
+          _handleMessage(Map<String, dynamic>.from(message));
         }
       });
     } else {
@@ -190,16 +185,16 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
         if (event is String) {
           try {
             final data = jsonDecode(event);
-            _handleOverlayEvent(data);
+            _handleMessage(data);
           } catch (e) {
             print("解析JSON数据失败: $e");
             // 可能是普通字符串消息
-            _handleOverlayEvent({"message": event});
+            _handleMessage({"message": event});
           }
         }
         // 处理Map类型数据
         else if (event is Map) {
-          _handleOverlayEvent(Map<String, dynamic>.from(event));
+          _handleMessage(Map<String, dynamic>.from(event));
         }
       } catch (e) {
         print("处理FlutterOverlayWindow消息出错: $e");
@@ -207,84 +202,239 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
     });
   }
 
-  // 处理来自主应用的事件
-  void _handleOverlayEvent(Map<String, dynamic> event) {
-    if (event.containsKey('command')) {
-      final command = event['command'];
+  // 统一处理所有接收到的消息
+  void _handleMessage(Map<String, dynamic> data) {
+    // 首先检查是否是命令类型消息
+    if (data.containsKey('command')) {
+      _handleCommandMessage(data);
+      return;
+    }
 
-      switch (command) {
-        case OverlayConstants.CMD_CLOSE:
-          _closeOverlay();
-          break;
+    // 处理其他类型消息
+    if (data.containsKey('type')) {
+      final type = data['type'];
 
-        case OverlayConstants.CMD_START_CAPTURE:
-          _startCapturing();
-          break;
-
-        case OverlayConstants.CMD_STOP_CAPTURE:
-          _stopCapturing();
-          break;
-
-        case OverlayConstants.CMD_UPDATE_BOARD:
-          if (event.containsKey('fen') && event.containsKey('player')) {
+      switch (type) {
+        // 处理引擎分析相关消息
+        case 'engine_hint_updated':
+          if (data.containsKey('hint')) {
             setState(() {
-              _boardFen = event['fen'];
-              _currentPlayer = event['player'];
+              _engineHint = data['hint'];
+            });
+          }
+          break;
+
+        case 'engine_thinking_state_changed':
+          if (data.containsKey('isThinking')) {
+            setState(() {
+              _isEngineThinking = data['isThinking'];
+            });
+          }
+          break;
+
+        case 'engine_move_updated':
+          if (data.containsKey('moves')) {
+            try {
+              List<String> moveStrings = List<String>.from(data['moves']);
+              List<Move> moves = moveStrings.map((s) => Move.fromEngineMove(s)).toList();
+              setState(() {
+                _engineMoves = moves;
+              });
+            } catch (e) {
+              print('处理引擎着法更新出错: $e');
+            }
+          }
+          break;
+
+        case 'engine_analysis_update':
+          // 处理引擎分析过程更新
+          print('收到引擎分析更新: 深度=${data['depth']}, 评分=${data['score']}, 判断=${data['judgement']}');
+          if (data.containsKey('moves')) {
+            try {
+              List<dynamic> moveStrings = data['moves'];
+              List<Move> moves = moveStrings.map((s) => Move.fromEngineMove(s.toString())).toList();
+              setState(() {
+                _engineMoves = moves;
+              });
+            } catch (e) {
+              print('处理引擎分析走法出错: $e');
+            }
+          }
+          break;
+
+        case 'engine_analysis_complete':
+          // 处理引擎分析完成
+          print('引擎分析完成: ${data['chineseMove'] ?? data['bestMove'] ?? data['message'] ?? "无结果"}');
+          setState(() {
+            _isEngineThinking = false;
+            if (data.containsKey('chineseMove')) {
+              _engineHint = data['chineseMove'];
+            } else if (data.containsKey('bestMove')) {
+              _engineHint = data['bestMove'];
+            } else if (data.containsKey('message')) {
+              _engineHint = data['message'];
+            }
+
+            // 更新走法箭头（如果有）
+            if (data.containsKey('moves')) {
+              try {
+                List<dynamic> moveStrings = data['moves'];
+                _engineMoves = moveStrings.map((s) => Move.fromEngineMove(s.toString())).toList();
+              } catch (e) {
+                print('处理最终走法出错: $e');
+              }
+            }
+          });
+          break;
+
+        case 'engine_analysis_failed':
+          // 处理引擎分析失败
+          setState(() {
+            _isEngineThinking = false;
+            _engineHint = data['message'] ?? "引擎分析失败";
+          });
+          break;
+
+        // 处理棋盘识别相关消息
+        case OverlayConstants.TYPE_ANALYSIS_RESULT:
+          if (data.containsKey('fen') && data.containsKey('player')) {
+            setState(() {
+              _boardFen = data['fen'];
+              _currentPlayer = data['player'];
               _lastCaptureTime = DateTime.now();
 
               // 更新BoardState
               _boardState.load(_boardFen, notify: true);
-
-              // 如果有引擎思考状态，更新
-              if (event.containsKey('isEngineThinking')) {
-                _isEngineThinking = event['isEngineThinking'];
-              }
-
-              // 如果有引擎提示，也更新
-              if (event.containsKey('engineHint')) {
-                _engineHint = event['engineHint'];
-                _isEngineThinking = false;
-              }
-
-              // 更新引擎走法箭头
-              if (event.containsKey('enginePV')) {
-                _updateEnginePV(event['enginePV']);
-              } else {
-                // 自动请求引擎提示
-                print("Kevin 666 CMD_UPDATE_BOARD request hint");
-                _requestEngineHint();
-              }
 
               _statusMessage = '最近识别: ${_formatTime(_lastCaptureTime!)}';
             });
           }
           break;
 
-        case OverlayConstants.CMD_SHOW_ERROR:
-          if (event.containsKey('message')) {
+        case OverlayConstants.TYPE_STATUS:
+          if (data.containsKey('message')) {
             setState(() {
-              _statusMessage = '错误: ${event['message']}';
+              _statusMessage = data['message'];
             });
           }
           break;
 
-        case OverlayConstants.CMD_REQUEST_HINT:
-          _requestEngineHint();
+        case OverlayConstants.TYPE_ERROR:
+          if (data.containsKey('message')) {
+            setState(() {
+              _statusMessage = '错误: ${data['message']}';
+            });
+          }
           break;
 
-        case OverlayConstants.CMD_TEST_CONNECTION:
-          // 接收到测试连接的消息，回复确认
-          _sendMessageToMain({
-            'type': 'connection_confirmed',
-            'timestamp': DateTime.now().millisecondsSinceEpoch,
-            'message': '悬浮窗确认连接'
+        case OverlayConstants.TYPE_TOGGLE_CAPTURE:
+          // 处理捕获状态切换结果
+          setState(() {
+            // 如果消息中包含明确的状态，使用它，否则切换当前状态
+            if (data.containsKey('newStatus')) {
+              _isCapturing = data['newStatus'];
+            } else {
+              _isCapturing = !_isCapturing;
+            }
+
+            _statusMessage = _isCapturing ? '正在识别...' : '识别已暂停';
           });
           break;
 
-        default:
-          print("未知命令: $command");
+        case 'capture_started':
+          setState(() {
+            _isCapturing = true;
+            _statusMessage = '开始识别...';
+          });
+          break;
+
+        case 'capture_stopped':
+          setState(() {
+            _isCapturing = false;
+            _statusMessage = '识别已暂停';
+          });
           break;
       }
+    }
+  }
+
+  // 处理命令类型消息
+  void _handleCommandMessage(Map<String, dynamic> data) {
+    final command = data['command'];
+
+    switch (command) {
+      case OverlayConstants.CMD_CLOSE:
+        _closeOverlay();
+        break;
+
+      case OverlayConstants.CMD_START_CAPTURE:
+        _startCapturing();
+        break;
+
+      case OverlayConstants.CMD_STOP_CAPTURE:
+        _stopCapturing();
+        break;
+
+      case OverlayConstants.CMD_UPDATE_BOARD:
+        if (data.containsKey('fen') && data.containsKey('player')) {
+          setState(() {
+            _boardFen = data['fen'];
+            _currentPlayer = data['player'];
+            _lastCaptureTime = DateTime.now();
+
+            // 更新BoardState
+            _boardState.load(_boardFen, notify: true);
+
+            // 如果有引擎思考状态，更新
+            if (data.containsKey('isEngineThinking')) {
+              _isEngineThinking = data['isEngineThinking'];
+            }
+
+            // 如果有引擎提示，也更新
+            if (data.containsKey('engineHint')) {
+              _engineHint = data['engineHint'];
+              _isEngineThinking = false;
+            }
+
+            // 更新引擎走法箭头
+            if (data.containsKey('enginePV')) {
+              // 使用公共方法，避免访问私有成员
+              List<dynamic> pvMoves = data['enginePV'];
+              try {
+                _engineMoves = pvMoves.map((s) => Move.fromEngineMove(s.toString())).toList();
+              } catch (e) {
+                print('解析走法出错: $e');
+              }
+            } else {
+              // 不再主动请求引擎提示，由服务层控制
+              print("收到棋盘更新，等待服务层主动提供引擎分析");
+            }
+
+            _statusMessage = '最近识别: ${_formatTime(_lastCaptureTime!)}';
+          });
+        }
+        break;
+
+      case OverlayConstants.CMD_SHOW_ERROR:
+        if (data.containsKey('message')) {
+          setState(() {
+            _statusMessage = '错误: ${data['message']}';
+          });
+        }
+        break;
+
+      case OverlayConstants.CMD_TEST_CONNECTION:
+        // 接收到测试连接的消息，回复确认
+        _sendMessageToMain({
+          'type': 'connection_confirmed',
+          'timestamp': DateTime.now().millisecondsSinceEpoch,
+          'message': '悬浮窗确认连接'
+        });
+        break;
+
+      default:
+        print("未知命令: $command");
+        break;
     }
   }
 
@@ -389,441 +539,15 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
     });
   }
 
-  // 更新引擎走法箭头
-  void _updateEnginePV(List pvMoves) {
-    try {
-      if (pvMoves.isEmpty) return;
-
-      // 创建引擎信息对象
-      final allMoves = pvMoves.cast<String>().join(' ');
-      final engineInfo = EngineInfo.parse('info depth 20 seldepth 30 multipv 1 score cp 50 nodes 10000 nps 5000 hashfull 0 tbhits 0 time 2000 pv $allMoves');
-
-      // 设置最佳着法
-      if (pvMoves.isNotEmpty) {
-        final bestmove = Bestmove(pvMoves[0]);
-        if (pvMoves.length > 1) {
-          bestmove.ponder = pvMoves[1];
-        }
-        _boardState.bestmove = bestmove;
-      }
-
-      // 设置引擎信息
-      _boardState.engineInfo = engineInfo;
-
-      // 生成中文着法描述
-      final position = Fen.positionFromFen(_boardFen);
-      if (position != null && pvMoves.isNotEmpty) {
-        final move = Move.fromEngineMove(pvMoves[0]);
-        final moveName = "${MoveName.translate(position, move)} (${pvMoves[0]})";
-        _engineHint = moveName;
-      }
-    } catch (e) {
-      print('更新引擎PV出错: $e');
-    }
-  }
-
-  // 请求引擎提示的方法
-  Future<void> _requestEngineHint() async {
-    if (_boardFen.isEmpty) {
-      print('FEN为空，无法请求引擎分析');
-      return;
-    }
-
-    // 检查本地状态标志
-    if (_isEngineThinking) {
-      print('本地引擎思考标志为true，跳过重复请求');
-      return;
-    }
-
-    // 直接检查引擎状态，如果忙则放弃分析
-    final state = PikafishEngine().state;
-    if (state == EngineState.searching || state == EngineState.pondering || state == EngineState.hinting) {
-      print('引擎当前状态: $state，放弃分析请求');
-      setState(() {
-        _engineHint = "引擎正忙，请稍候再试";
-      });
-      return;
-    }
-
-    // 尝试创建Position对象验证FEN
-    final position = Fen.positionFromFen(_boardFen);
-    if (position == null) {
-      print('无效的FEN，无法创建棋局位置');
-      setState(() {
-        _isEngineThinking = false;
-        _engineHint = "无效的棋盘状态";
-      });
-      return;
-    }
-
-    // 检查是否有足够的棋子
-    int pieceCount = 0;
-    for (int i = 0; i < 90; i++) {
-      if (position.pieceAt(i) != Piece.noPiece) {
-        pieceCount++;
-      }
-    }
-
-    if (pieceCount < 3) {
-      print('棋盘上棋子数量不足，跳过分析');
-      setState(() {
-        _isEngineThinking = false;
-        _engineHint = "棋子数量不足，无法分析";
-      });
-      return;
-    }
-
-    // 设置本地思考标志，阻止并发请求
-    setState(() {
-      _isEngineThinking = true;
-    });
-
-    print('请求引擎提示，走棋方: ${_currentPlayer == 'red' ? '红方' : '黑方'}');
-
-    // 引擎分析超时管理
-    Timer? analysisTimeout;
-
-    try {
-      // 先停止任何正在进行的引擎分析
-      await _stopPonder();
-      await Future.delayed(const Duration(milliseconds: 500));
-
-      // 二次检查引擎状态，确保真的停止了
-      final stateAfterStop = PikafishEngine().state;
-      if (stateAfterStop != EngineState.ready && stateAfterStop != EngineState.free) {
-        print('引擎未能停止，当前状态: $stateAfterStop，尝试强制停止');
-        await HybridEngine().stop();
-        await Future.delayed(const Duration(milliseconds: 500));
-      }
-
-      // 设置多层超时保护
-      // 1. 短超时：用于快速反馈
-      // 2. 长超时：确保引擎最终会停止
-      analysisTimeout = Timer(const Duration(seconds: 3), () {
-        print('引擎分析超时(3秒)，停止分析');
-        try {
-          HybridEngine().stop();
-          print('停止引擎');
-          setState(() {
-            _isEngineThinking = false;
-            _engineHint = "分析超时，请重试";
-          });
-        } catch (e) {
-          print('停止超时引擎出错: $e');
-          setState(() {
-            _isEngineThinking = false;
-            _engineHint = "停止分析出错";
-          });
-        }
-      });
-
-      print('开始引擎分析: ${_boardFen}');
-
-      // 使用goHint代替go，更明确表达意图
-      await HybridEngine().goHint(position, _engineCallback);
-
-      // 正常情况下不会执行到这里，因为goHint是异步的，
-      // 回调会在引擎完成时被调用，届时需要取消超时定时器
-
-    } catch (e) {
-      print('请求引擎提示时出错: $e');
-      // 清除超时定时器
-      analysisTimeout?.cancel();
-
-      setState(() {
-        _isEngineThinking = false;
-        _engineHint = "引擎分析出错，请重试";
-      });
-
-      // 确保引擎处于干净状态
-      try {
-        await HybridEngine().stop();
-      } catch (_) {}
-    }
-  }
-
-  // 设置走棋提示显示方法（从BoardRecognitionPage中移植而来）
-  void _setupEngineMovesToDisplay(BoardState boardState, List<Move> moves) {
-    if (moves.isEmpty) return;
-
-    try {
-      print('设置引擎走法箭头: ${moves.length} 个着法');
-
-      // 创建一个临时位置，检查走法是否有效
-      final position = Fen.positionFromFen(_boardFen);
-      if (position == null) return;
-
-      // 过滤有效的走法（必须能在当前棋盘上执行）
-      List<Move> validMoves = [];
-      List<String> validMovesStr = [];
-
-      for (var move in moves) {
-        try {
-          // 确保走法是有效的
-          if (position.validateMove(move.from, move.to)) {
-            validMoves.add(move);
-            validMovesStr.add(move.asEngineMove());
-          }
-        } catch (e) {
-          print('走法验证出错: $e');
-        }
-      }
-
-      // 如果没有有效走法，直接返回
-      if (validMoves.isEmpty) {
-        print('没有找到有效走法，不显示箭头');
-        return;
-      }
-
-      // 最多只显示两个走法（当前方和对手方）
-      if (validMoves.length > 2) {
-        validMoves = validMoves.sublist(0, 2);
-        validMovesStr = validMovesStr.sublist(0, 2);
-      }
-
-      final stringPV = validMovesStr.join(' ');
-      print('创建引擎信息 PV: $stringPV');
-
-      // 创建引擎信息对象，使用安全的固定评分
-      final engineInfo = EngineInfo.parse('info depth 20 seldepth 30 multipv 1 score cp 50 nodes 10000 nps 5000 hashfull 0 tbhits 0 time 2000 pv $stringPV');
-
-      // 设置引擎信息
-      boardState.engineInfo = engineInfo;
-
-      // 设置bestmove和ponder（如果有）
-      if (validMoves.isNotEmpty) {
-        print('设置最佳着法: ${validMoves[0].asEngineMove()}');
-        final bestMove = Bestmove(validMoves[0].asEngineMove());
-
-        // 设置ponder（如果有第二个走法）
-        if (validMoves.length >= 2) {
-          bestMove.ponder = validMoves[1].asEngineMove();
-          print('设置对方走法: ${bestMove.ponder}');
-        }
-
-        // 安全地更新bestmove
-        boardState.bestmove = bestMove;
-      } else {
-        boardState.bestmove = null;
-      }
-
-      // 通知更新UI
-      boardState.notifyListeners();
-    } catch (e) {
-      print('设置走棋提示显示出错: $e');
-    }
-  }
-
-  // 引擎回调函数
-  void _engineCallback(EngineResponse er) {
-    try {
-      final resp = er.response;
-
-      // 处理已取消的分析请求
-      if (!_isEngineThinking) {
-        print('收到引擎响应，但分析已被取消，忽略此响应');
-        try {
-          // 确保引擎停止
-          HybridEngine().stop();
-        } catch (_) {}
-        return;
-      }
-
-      // 处理引擎响应
-      if (resp is EngineInfo) {
-        if (resp.pvs.isEmpty) {
-          print('引擎返回空的PV列表，跳过处理');
-          return;
-        }
-
-        // 保存最新的引擎分析信息
-        _boardState.engineInfo = resp;
-
-        // 获取评估相关信息
-        final score = resp.tokens['score'];
-        final depth = resp.tokens['depth'];
-        final cpOrMate = resp.tokens['cp_or_mate'];
-
-        if (score != null && depth != null) {
-          final judgement = cpOrMate == 1
-            ? (score > 0 ? "$score 步成杀" : "${-score} 步被杀")
-            : (score == 0 ? "均势" : (score > 0 ? "优势" : "劣势"));
-
-          // 检查是否找到必胜着法等情况
-          if (cpOrMate == 1 && depth >= 60) {
-            try {
-              HybridEngine().stop();
-              print('发现必胜着法，停止引擎');
-            } catch (e) {
-              print('停止引擎时出错: $e');
-            }
-          }
-        }
-
-        // 如果分析深度足够，尝试更新箭头
-        if (resp.pvs.isNotEmpty && (depth == null || depth >= 10)) {
-          try {
-            List<Move> engineMoves = [];
-
-            // 尝试安全地解析每个走法
-            for (var moveStr in resp.pvs) {
-              try {
-                engineMoves.add(Move.fromEngineMove(moveStr));
-              } catch (e) {
-                print('解析走法失败: $moveStr, $e');
-              }
-            }
-
-            if (engineMoves.isNotEmpty) {
-              // 立即更新UI上的箭头
-              setState(() {
-                _engineMoves = engineMoves;
-              });
-              _setupEngineMovesToDisplay(_boardState, engineMoves);
-            }
-          } catch (e) {
-            print('处理引擎PV信息出错: $e');
-          }
-        }
-      } else if (resp is Bestmove) {
-        print('引擎最佳着法: ${resp.bestmove}');
-
-        if (resp.bestmove != null) {
-          try {
-            final move = Move.fromEngineMove(resp.bestmove);
-
-            // 创建当前走法列表
-            List<Move> newMoves = [move];
-
-            // 安全地添加后续走法
-            if (resp.ponder != null) {
-              try {
-                newMoves.add(Move.fromEngineMove(resp.ponder!));
-                print('添加后续走法: ${resp.ponder}');
-              } catch (e) {
-                print('解析后续走法时出错: $e');
-              }
-            }
-
-            setState(() {
-              _engineMoves = newMoves;
-              _isEngineThinking = false;  // 分析完成，重置标志
-            });
-
-            // 更新棋盘显示
-            _setupEngineMovesToDisplay(_boardState, newMoves);
-
-            // 尝试生成中文着法描述
-            try {
-              final position = Fen.positionFromFen(_boardFen);
-              if (position != null) {
-                final moveName = "${MoveName.translate(position, move)} (${resp.bestmove})";
-                setState(() {
-                  _engineHint = moveName;
-                });
-                print('引擎建议: $moveName');
-
-                // 发送引擎提示回主应用
-                _sendAnalysisResult(_boardFen, _currentPlayer, moveName);
-              } else {
-                setState(() {
-                  _engineHint = resp.bestmove;
-                });
-
-                // 发送引擎提示回主应用
-                _sendAnalysisResult(_boardFen, _currentPlayer, resp.bestmove);
-              }
-            } catch (e) {
-              print('生成走法描述时出错: $e');
-              setState(() {
-                _engineHint = resp.bestmove;
-              });
-            }
-          } catch (e) {
-            print('解析引擎着法时出错: $e');
-            setState(() {
-              _engineHint = resp.bestmove;
-              _isEngineThinking = false;  // 确保重置标志
-            });
-
-            // 发送引擎提示回主应用
-            _sendAnalysisResult(_boardFen, _currentPlayer, resp.bestmove);
-          }
-        } else {
-          setState(() {
-            _isEngineThinking = false;  // 确保重置标志
-          });
-        }
-      } else if (resp is NoBestmove) {
-        // 处理无最佳着法的情况
-        setState(() {
-          _isEngineThinking = false;  // 确保重置标志
-          _engineHint = "无法找到有效走法";
-        });
-
-        // 发送状态消息
-        _sendStatusUpdate("无法找到有效走法");
-      } else if (resp is Error) {
-        print('引擎返回错误: ${resp.message}');
-        setState(() {
-          _isEngineThinking = false;  // 确保重置标志
-          _engineHint = "引擎错误: ${resp.message}";
-        });
-
-        // 发送错误消息
-        _sendStatusUpdate('引擎返回错误: ${resp.message}', true);
-      }
-    } catch (e) {
-      print('引擎回调处理异常: $e');
-      setState(() {
-        _isEngineThinking = false;  // 确保重置标志
-        _engineHint = "分析出错";
-      });
-
-      // 处理异常，确保引擎停止
-      try {
-        HybridEngine().stop();
-      } catch (_) {}
-    }
-  }
-
   String _formatTime(DateTime time) {
     return '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}:${time.second.toString().padLeft(2, '0')}';
   }
 
   void _togglePlayer() {
-    setState(() {
-      _currentPlayer = _currentPlayer == 'red' ? 'black' : 'red';
-
-      // 更新FEN中的走棋方
-      if (_boardFen.isNotEmpty) {
-        final parts = _boardFen.split(' ');
-        if (parts.length >= 2) {
-          parts[1] = _currentPlayer == 'red' ? 'w' : 'b';
-          _boardFen = parts.join(' ');
-        }
-
-        // 更新BoardState
-        _boardState.load(_boardFen, notify: true);
-
-        // 确保箭头显示设置始终为true
-        LocalData().thinkingArrowEnabled.value = true;
-
-        // 不立即清除引擎提示和箭头，等新的分析结果出来后再更新
-        // _engineHint = null;
-        // _engineMoves = [];
-      }
-    });
-
-    // 重置引擎状态
-    _stopPonder().then((_) async {
-      await Future.delayed(const Duration(milliseconds: 500));
-      await HybridEngine().stop();
-      await Future.delayed(const Duration(milliseconds: 500));
-      await HybridEngine().newGame();
-
-      // 切换后自动请求新走法提示
-      _requestEngineHint();
+    // 通过消息请求切换走棋方
+    _sendMessageToMain({
+      'type': 'toggle_player',
+      'timestamp': DateTime.now().millisecondsSinceEpoch
     });
   }
 
@@ -850,78 +574,7 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
 
   // 处理来自OverlayService的数据
   void _handleServiceData(Map<String, dynamic> data) {
-    if (data.containsKey('type')) {
-      final type = data['type'];
-
-      switch (type) {
-        case OverlayConstants.TYPE_ANALYSIS_RESULT:
-          if (data.containsKey('fen') && data.containsKey('player')) {
-            setState(() {
-              _boardFen = data['fen'];
-              _currentPlayer = data['player'];
-              _lastCaptureTime = DateTime.now();
-
-              // 更新BoardState
-              _boardState.load(_boardFen, notify: true);
-
-              _statusMessage = '最近识别: ${_formatTime(_lastCaptureTime!)}';
-            });
-
-            // 请求引擎提示
-            _requestEngineHint();
-          }
-          break;
-
-        case OverlayConstants.TYPE_STATUS:
-          if (data.containsKey('message')) {
-            setState(() {
-              _statusMessage = data['message'];
-            });
-          }
-          break;
-
-        case OverlayConstants.TYPE_ERROR:
-          if (data.containsKey('message')) {
-            setState(() {
-              _statusMessage = '错误: ${data['message']}';
-            });
-          }
-          break;
-
-        case OverlayConstants.TYPE_TOGGLE_CAPTURE:
-          // 处理捕获状态切换结果
-          setState(() {
-            // 如果消息中包含明确的状态，使用它，否则切换当前状态
-            if (data.containsKey('newStatus')) {
-              _isCapturing = data['newStatus'];
-            } else {
-              _isCapturing = !_isCapturing;
-            }
-
-            _statusMessage = _isCapturing ? '正在识别...' : '识别已暂停';
-          });
-          break;
-
-        case 'capture_started':
-          setState(() {
-            _isCapturing = true;
-            _statusMessage = '开始识别...';
-          });
-          break;
-
-        case 'capture_stopped':
-          setState(() {
-            _isCapturing = false;
-            _statusMessage = '识别已暂停';
-          });
-          break;
-
-        case 'request_engine_hint':
-          // 收到请求引擎提示的消息
-          _requestEngineHint();
-          break;
-      }
-    }
+    // This method is removed as per the instructions
   }
 
   // 添加防抖处理方法
@@ -981,33 +634,6 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
           _reportOverlayPosition();
         }
       });
-    }
-  }
-
-  // 停止后台思考并释放引擎资源
-  Future<void> _stopPonder() async {
-    try {
-      await HybridEngine().stopPonder();
-      _boardState.engineInfo = null;
-      _boardState.bestmove = null;
-    } catch (e) {
-      print('停止后台思考出错: $e');
-    }
-  }
-
-  // 停止引擎的思考并清理相关资源
-  Future<void> _stopEngine() async {
-    try {
-      await _stopPonder();
-      await Future.delayed(const Duration(milliseconds: 300));
-      await HybridEngine().stop();
-      setState(() {
-        if (_isEngineThinking) {
-          _isEngineThinking = false;
-        }
-      });
-    } catch (e) {
-      print('停止引擎思考出错: $e');
     }
   }
 
@@ -1242,10 +868,12 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
                                     color: Colors.transparent,
                                     child: InkWell(
                                       onTap: (){
-                                        print("Kevin 666 click _requestEngineHint");
-                                        if(!_isEngineThinking){
-                                          _requestEngineHint();
-                                        }
+                                        print("引擎提示请求已发送到服务层");
+                                        // 使用消息通知服务层请求引擎提示
+                                        _sendMessageToMain({
+                                          'type': 'request_engine_hint',
+                                          'timestamp': DateTime.now().millisecondsSinceEpoch
+                                        });
                                       },
                                       borderRadius: BorderRadius.circular(4 * _currentScale),
                                       child: Container(
@@ -1352,12 +980,8 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
     // 停止捕获并清理资源
     _stopCapturing();
 
-    // 停止引擎 - 使用try-catch避免异常影响析构
-    try {
-      _stopEngine();
-    } catch (e) {
-      print('dispose时停止引擎出错: $e');
-    }
+    // 停止引擎 - 现在由OverlayService处理
+    // 不再需要直接处理引擎资源
 
     // 清理IsolateNameServer相关资源
     _overlayReceivePort?.close();

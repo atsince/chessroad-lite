@@ -86,8 +86,8 @@ void overlayMain() async {
   LocalData().thinkingArrowEnabled.value = true;
 
 
-  await HybridEngine().startup();
-  await HybridEngine().newGame();
+  // await HybridEngine().startup();
+  // await HybridEngine().newGame();
 
   print('启动悬浮窗应用');
   runApp(const MaterialApp(
