@@ -388,23 +388,26 @@ class OverlayService {
 
   // 20个残局棋盘
   final List<String> endgamePositions = [
-    '4k4/4a4/2P1ba3/2p4r1/3P2R2/9/9/4B4/4A4/2BAK4 w - - 0 1',
-    '2bak4/4a4/4b4/9/9/2B6/9/3AB4/4A4/4K4 w - - 0 1',
-    '4ka3/4a4/4b4/9/9/9/9/4B4/4A4/3AK4 w - - 0 1',
-    '3ak4/9/3ab4/9/9/9/9/4B4/4A4/4K4 w - - 0 1',
-    '3k5/4P4/4b4/9/9/9/9/9/9/4K4 w - - 0 1',
-    '4k4/4a4/4ba3/9/9/9/9/4B4/4A4/2BAK4 w - - 0 1',
+    // '4k4/4a4/2P1ba3/2p4r1/3P2R2/9/9/4B4/4A4/2BAK4 w - - 0 1',
+    // '2bak4/4a4/4b4/9/9/2B6/9/3AB4/4A4/4K4 w - - 0 1',
+    // '4ka3/4a4/4b4/9/9/9/9/4B4/4A4/3AK4 w - - 0 1',
+    // '3ak4/9/3ab4/9/9/9/9/4B4/4A4/4K4 w - - 0 1',
+    // '3k5/4P4/4b4/9/9/9/9/9/9/4K4 w - - 0 1',
+    // '4k4/4a4/4ba3/9/9/9/9/4B4/4A4/2BAK4 w - - 0 1',
+
     // '3ak4/9/4b4/9/9/9/9/4B4/4A4/4K4 w - - 0 1',
     // '5k3/4P4/9/9/9/9/9/9/9/4K4 w - - 0 1',
     // '3k5/9/3N5/9/9/9/9/9/9/4K4 w - - 0 1',
     // '4k4/4a4/4b4/9/9/9/9/4B4/4A4/4K4 w - - 0 1',
+
+
     // '3ak4/9/4b4/4N4/9/9/9/9/9/4K4 w - - 0 1',
     // '5k3/4P4/4b4/9/9/9/9/9/9/4K4 w - - 0 1',
     // '3k5/9/3C5/9/9/9/9/9/9/4K4 w - - 0 1',
     // '4k4/4a4/4b4/9/9/9/9/4B4/4A4/3AK4 w - - 0 1',
     // '3ak4/9/4b4/4C4/9/9/9/9/9/4K4 w - - 0 1',
     // '4k4/4P4/4b4/9/9/9/9/9/9/4K4 w - - 0 1',
-    // '3k5/9/3R5/9/9/9/9/9/9/4K4 w - - 0 1',
+    '3k5/9/3R5/9/9/9/9/9/9/4K4 w - - 0 1',
     // '4k4/4a4/4b4/9/9/9/9/4B4/4A4/2BAK4 w - - 0 1',
     // '3ak4/9/4b4/4R4/9/9/9/9/9/4K4 w - - 0 1',
     // '4k4/4a4/4b4/9/9/9/9/4B4/4A4/4K4 w - - 0 1'
@@ -448,6 +451,8 @@ class OverlayService {
       final initBoard = endgamePositions[random.nextInt(endgamePositions.length)];
        await updateBoard(initBoard, 'black');
        _currentFen= initBoard;
+
+
         await requestEngineHint(_currentFen);
   }
 
@@ -597,8 +602,10 @@ class OverlayService {
       return;
     }
 
+
+
     // 尝试创建Position对象验证FEN
-    final position = Fen.positionFromFen(fen);
+    var position = Fen.positionFromFen(fen);
     if (position == null) {
       print('无效的FEN，无法创建棋局位置');
       _isEngineThinking = false;
@@ -606,6 +613,30 @@ class OverlayService {
       _notifyEngineHintUpdated();
       return;
     }
+
+    // 检查并纠正FEN中的走子方
+    if (position.isRedChecking() && fen.contains(' w ')) {
+      // 如果红方正在将军且FEN显示红方走子，修正为黑方走子
+      fen = fen.replaceFirst(' w ', ' b ');
+      print('纠正FEN：红方将军时改为黑方走子: $fen');
+      // 重新创建Position对象
+      position = Fen.positionFromFen(fen);
+    } else if (position.isBlackChecking() && fen.contains(' b ')) {
+      // 如果黑方正在将军且FEN显示黑方走子，修正为红方走子
+      fen = fen.replaceFirst(' b ', ' w ');
+      print('纠正FEN：黑方将军时改为红方走子: $fen');
+      // 重新创建Position对象
+      position = Fen.positionFromFen(fen);
+    }
+
+    if (position == null) {
+      print('无效的FEN，无法创建棋局位置');
+      _isEngineThinking = false;
+      _engineHint = "无效的棋盘状态";
+      _notifyEngineHintUpdated();
+      return;
+    }
+
 
     // 检查是否有足够的棋子
     int pieceCount = 0;
@@ -629,8 +660,8 @@ class OverlayService {
 
     print('请求引擎提示，走棋方: ${_currentPlayer == 'red' ? '红方' : '黑方'}');
 
-    // 引擎分析超时管理
-    Timer? analysisTimeout;
+    // // 引擎分析超时管理
+    // Timer? analysisTimeout;
 
     try {
       // 先停止任何正在进行的引擎分析

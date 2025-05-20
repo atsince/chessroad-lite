@@ -297,4 +297,34 @@ class Position {
   String? get lastCapturedPosition => _lastCapturedPosition;
   String get allMoves => _recorder.allMoves();
   String get movesAfterLastCaptured => _recorder.movesAfterLastCaptured();
+
+  // Helper method: Checks if the king of 'kingColor' is attacked by the other side.
+  bool _isKingOfColorAttacked(String kingColor) {
+    final String originalSide = _sideToMove; // Store original side
+    _sideToMove = kingColor; // Assume it's kingColor's turn, so beChecked checks kingColor's king
+    bool isAttacked = ChessRules.beChecked(this); // Checks if kingColor's king is attacked by the other side
+    _sideToMove = originalSide; // Restore original side
+    return isAttacked;
+  }
+
+  bool isRedChecking() {
+    // New definition: It's Red's turn (_sideToMove == PieceColor.red)
+    // AND Red is checking the Black king (i.e., Black king is attacked by Red pieces)
+    if (_sideToMove == PieceColor.red) {
+      // Check if Black's king is attacked
+      return _isKingOfColorAttacked(PieceColor.black);
+    }
+    return false;
+  }
+
+  bool isBlackChecking() {
+    // New definition: It's Black's turn (_sideToMove == PieceColor.black)
+    // AND Black is checking the Red king (i.e., Red king is attacked by Black pieces)
+    if (_sideToMove == PieceColor.black) {
+      // Check if Red's king is attacked
+      return _isKingOfColorAttacked(PieceColor.red);
+    }
+    return false;
+  }
+
 }
