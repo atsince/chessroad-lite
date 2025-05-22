@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as path;
+import 'package:http_parser/http_parser.dart';
 
 // 定义日志回调函数类型
 typedef LogCallback = void Function(String message);
@@ -62,19 +63,34 @@ class BoardRecognitionService {
       final filename = path.basename(imageFile.path);
       log('BoardRecognitionService: 文件名: $filename');
 
+      // 读取文件内容
+      final bytes = await imageFile.readAsBytes();
+
+      // 创建MultipartFile时指定contentType为image/jpeg
       request.files.add(
-        await http.MultipartFile.fromPath(
+        http.MultipartFile.fromBytes(
           'image',
-          imageFile.path,
+          bytes,
           filename: filename,
+          contentType: MediaType('image', 'jpeg'),
         ),
       );
+
+      // 设置请求头
+      request.headers.addAll({
+        'Accept': 'application/json',
+      });
 
       log('BoardRecognitionService: 发送请求到 $apiUrl');
       final streamedResponse = await request.send();
 
       log('BoardRecognitionService: 收到响应，状态码: ${streamedResponse.statusCode}');
       log('BoardRecognitionService: 响应头: ${streamedResponse.headers}');
+
+      if (streamedResponse.statusCode != 200) {
+        log('BoardRecognitionService: 请求失败，状态码: ${streamedResponse.statusCode}');
+        return BoardRecognitionResult.error('服务器返回错误状态码: ${streamedResponse.statusCode}');
+      }
 
       final responseData = await streamedResponse.stream.bytesToString();
       log('BoardRecognitionService: 响应体长度: ${responseData.length}');

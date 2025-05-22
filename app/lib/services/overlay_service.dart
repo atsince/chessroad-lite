@@ -21,6 +21,7 @@ import '../engine/hybrid_engine.dart';
 import '../engine/pikafish_engine.dart';
 import '../cchess/move_name.dart';
 import '../game/board_state.dart';
+import '../config/local_data.dart';
 
 // 定义通信常量
 class OverlayConstants {
@@ -71,7 +72,6 @@ class OverlayService {
   String? _engineHint;
   String _currentFen = '';
   String _currentPlayer = 'red';
-  BoardState? _boardState;
 
   // 获取数据流，用于监听从悬浮窗接收到的数据
   Stream<Map<String, dynamic>> get dataStream => _dataController.stream;
@@ -250,6 +250,10 @@ class OverlayService {
   }
 
   Future<void> startCapturing({int intervalSeconds = 1}) async {
+    // 先测试箭头显示功能
+    await _testArrowDisplay();
+
+    // 然后继续正常流程
     if (_isCapturing) return;
 
     final hasPermission = await requestScreenCapturePermission();
@@ -267,10 +271,8 @@ class OverlayService {
       'timestamp': DateTime.now().millisecondsSinceEpoch
     });
 
-    await sendCommand(OverlayConstants.CMD_SHOW_ERROR, {
-      'message': '开始识别中...',
-    });
-
+    await sendStatusUpdate('开始识别中...');
+    var isProcessing = false;
     try {
       // 使用流式截屏持续捕获
       final stream = await screenShot2.startCapture(fps:1);
@@ -280,29 +282,30 @@ class OverlayService {
             if (data != null && _isCapturing) {
               final now = DateTime.now();
               // 检查是否已过间隔时间
-              if (_lastCaptureTime == null || now.difference(_lastCaptureTime!).inSeconds >= intervalSeconds) {
+              if ((_lastCaptureTime == null || now.difference(_lastCaptureTime!).inSeconds >= intervalSeconds)&&(!isProcessing)) {
                 _lastCaptureTime = now; // 更新上次捕获时间
 
                 try {
-                  await _testEngineHint();
-                  // final capturedImage = CapturedImage.fromMap(Map<String, dynamic>.from(data));
-                  // if (capturedImage.bytes != null) {
-                  //   debugPrint('处理截屏数据 - ${now.toIso8601String()}');
+                  final capturedImage = CapturedImage.fromMap(Map<String, dynamic>.from(data));
+                  if (capturedImage.bytes != null) {
+                    isProcessing = true;
+                    debugPrint('处理截屏数据 - ${now.toIso8601String()}');
 
-                  //   // 判断是否需要绿幕处理
-                  //   Uint8List processedImageBytes = capturedImage.bytes;
-                  //   if (_overlayRect != null) {
-                  //     processedImageBytes = await _applyGreenScreenToOverlayArea(capturedImage.bytes);
-                  //   }
+                    // 判断是否需要绿幕处理
+                    Uint8List processedImageBytes = capturedImage.bytes;
+                    if (_overlayRect != null) {
+                      processedImageBytes = await _applyGreenScreenToOverlayArea(capturedImage.bytes);
+                    }
 
-                  //   // 保存处理后的截屏到临时文件
-                  //   final tempFile = await _saveScreenshotToTemp(processedImageBytes);
-                  //   // 打印临时文件大小
-                  //   final fileSize = await tempFile.length();
-                  //   debugPrint('临时文件大小: ${fileSize} bytes');
-                  //   // 上传截屏到棋盘识别服务
-                  //   await _recognizeBoard(tempFile);
-                  // }
+                    // 保存处理后的截屏到临时文件
+                    final tempFile = await _saveScreenshotToTemp(processedImageBytes);
+                    // 打印临时文件大小
+                    final fileSize = await tempFile.length();
+                    debugPrint('临时文件大小: ${fileSize} bytes');
+                    // 上传截屏到棋盘识别服务
+                    await _recognizeBoard(tempFile);
+                    isProcessing = false;
+                  }
                 } catch (e) {
                   debugPrint('处理截屏数据失败: $e');
                 }
@@ -353,9 +356,7 @@ class OverlayService {
       'timestamp': DateTime.now().millisecondsSinceEpoch
     });
 
-    await sendCommand(OverlayConstants.CMD_SHOW_ERROR, {
-      'message': '识别已暂停',
-    });
+    await sendStatusUpdate('识别已暂停');
   }
 
   Uint8List _createMockScreenshot() {
@@ -446,15 +447,15 @@ class OverlayService {
     await _sendMessageToOverlay(data);
   }
 
-  Future _testEngineHint() async{
-    final random = Random();
-      final initBoard = endgamePositions[random.nextInt(endgamePositions.length)];
-       await updateBoard(initBoard, 'black');
-       _currentFen= initBoard;
+  // Future _testEngineHint() async{
+  //   final random = Random();
+  //     final initBoard = endgamePositions[random.nextInt(endgamePositions.length)];
+  //      await updateBoard(initBoard, 'black');
+  //      _currentFen= initBoard;
 
 
-        await requestEngineHint(_currentFen);
-  }
+  //       await requestEngineHint(_currentFen);
+  // }
 
   Future<void> _recognizeBoard(File imageFile) async {
     try {
@@ -462,45 +463,49 @@ class OverlayService {
 
 
       // 随机选择一个残局
-      final random = Random();
-      final initBoard = endgamePositions[random.nextInt(endgamePositions.length)];
-       await updateBoard(initBoard, 'black');
-        await requestEngineHint(_currentFen);
-      // // 上传识别棋盘
-      // final result = await BoardRecognitionService.recognizeBoard(
-      //   imageFile,
-      //   _apiUrl,
-      // );
-      //
-      // if (result.success && result.fen != null && result.fen!.isNotEmpty) {
-      //   // 成功识别棋盘
-      //   await sendStatusUpdate('棋盘识别成功，正在验证...');
-      //
-      //   // 验证FEN是否符合棋理
-      //   final bool isValidFen = validateFen(result.fen!);
-      //
-      //   if (isValidFen) {
-      //     await sendStatusUpdate('棋盘验证成功，正在分析...');
-      //
-      //     // 更新当前FEN和走棋方
-      //     final parts = result.fen!.split(' ');
-      //     final String sideToMove = parts.length > 1 ? parts[1] : 'w';
-      //     final currentPlayer = sideToMove == 'w' ? 'red' : 'black';
-      //     print('FEN parts: $parts');
-      //     print('Side to move: $sideToMove');
-      //     print('Current player: $currentPlayer');
-      //
-      //     // 更新棋盘状态
-      //     await updateBoard(result.fen!, currentPlayer);
-      //
-      //     // // 通知主应用请求引擎分析
-      //     // await requestEngineHint();
-      //   } else {
-      //     await showError('棋盘布局无效，请确保棋子摆放符合规则');
-      //   }
-      // } else {
-      //   await showError(result.message ?? '棋盘识别失败');
-      // }
+      // final random = Random();
+      // final initBoard = endgamePositions[random.nextInt(endgamePositions.length)];
+      //  await updateBoard(initBoard, 'black');
+      //   await requestEngineHint(_currentFen);
+      // 上传识别棋盘
+      final result = await BoardRecognitionService.recognizeBoard(
+        imageFile,
+        _apiUrl,
+      );
+
+      if (result.success && result.fen != null && result.fen!.isNotEmpty) {
+        // 成功识别棋盘
+        await sendStatusUpdate('棋盘识别成功，正在验证...');
+
+        // 验证FEN是否符合棋理
+        final bool isValidFen = validateFen(result.fen!);
+
+        if (isValidFen) {
+          await sendStatusUpdate('棋盘验证成功，正在分析...');
+
+          // 更新当前FEN和走棋方
+          final parts = result.fen!.split(' ');
+          final String sideToMove = parts.length > 1 ? parts[1] : 'w';
+          final currentPlayer = sideToMove == 'w' ? 'red' : 'black';
+          print('FEN parts: $parts');
+          print('Side to move: $sideToMove');
+          print('Current player: $currentPlayer');
+
+
+          _currentFen = result.fen!;
+          // _currentFen = "2bk2b2/4R1cC1/1R7/p7p/4n4/3p1p3/P8/4BC3/4A4/4K1B2 w - - 0 1";
+
+          // 更新棋盘状态
+          await updateBoard(_currentFen, currentPlayer);
+
+          // // 通知主应用请求引擎分析
+          await requestEngineHint(_currentFen);
+        } else {
+          await showError('棋盘布局无效，请确保棋子摆放符合规则');
+        }
+      } else {
+        await showError(result.message ?? '棋盘识别失败');
+      }
     } catch (e) {
       await showError('棋盘识别过程出错: $e');
     }
@@ -602,7 +607,8 @@ class OverlayService {
       return;
     }
 
-
+    // 确保LocalData中的箭头显示设置为true
+    LocalData().thinkingArrowEnabled.value = true;
 
     // 尝试创建Position对象验证FEN
     var position = Fen.positionFromFen(fen);
@@ -611,28 +617,23 @@ class OverlayService {
       _isEngineThinking = false;
       _engineHint = "无效的棋盘状态";
       _notifyEngineHintUpdated();
+
+      // 使用测试棋盘位置以确保箭头能显示
+      _testArrowDisplay();
       return;
     }
 
-    // 检查并纠正FEN中的走子方
+    // 检查FEN中的走子方与将军状态
     if (position.isRedChecking() && fen.contains(' w ')) {
-      // 如果红方正在将军且FEN显示红方走子，修正为黑方走子
-      fen = fen.replaceFirst(' w ', ' b ');
-      print('纠正FEN：红方将军时改为黑方走子: $fen');
-      // 重新创建Position对象
-      position = Fen.positionFromFen(fen);
+      print('INFO: Red is checking, and FEN indicates Red to move. Returning from callback. FEN: $_currentFen');
+        _isEngineThinking = false;
+      _engineHint = "红方走，红方正在将黑方的军";
+      _notifyEngineHintUpdated();
+      return;
     } else if (position.isBlackChecking() && fen.contains(' b ')) {
-      // 如果黑方正在将军且FEN显示黑方走子，修正为红方走子
-      fen = fen.replaceFirst(' b ', ' w ');
-      print('纠正FEN：黑方将军时改为红方走子: $fen');
-      // 重新创建Position对象
-      position = Fen.positionFromFen(fen);
-    }
-
-    if (position == null) {
-      print('无效的FEN，无法创建棋局位置');
-      _isEngineThinking = false;
-      _engineHint = "无效的棋盘状态";
+      print('INFO: Black is checking, and FEN indicates Black to move. Returning from callback. FEN: $_currentFen');
+         _isEngineThinking = false;
+      _engineHint = "黑方走，黑方正在将红方的军";
       _notifyEngineHintUpdated();
       return;
     }
@@ -666,7 +667,7 @@ class OverlayService {
     try {
       // 先停止任何正在进行的引擎分析
       await _stopPonder();
-      await Future.delayed(const Duration(milliseconds: 1000));
+      // await Future.delayed(const Duration(milliseconds: 1000));
 
 
 
@@ -675,10 +676,10 @@ class OverlayService {
       if (stateAfterStop != EngineState.ready && stateAfterStop != EngineState.free) {
         print('引擎未能停止，当前状态: $stateAfterStop，尝试强制停止');
         await HybridEngine().stop();
-        await Future.delayed(const Duration(milliseconds: 500));
+        await Future.delayed(const Duration(milliseconds: 100));
       }
       await HybridEngine().newGame();
-      await Future.delayed(const Duration(milliseconds: 1000));
+      // await Future.delayed(const Duration(milliseconds: 1000));
       // // 设置超时保护
       // analysisTimeout = Timer(const Duration(seconds: 5), () {
       //   print('引擎分析超时(3秒)，停止分析');
@@ -720,7 +721,7 @@ class OverlayService {
 
   // 设置走棋提示显示方法
   void _setupEngineMovesToDisplay(List<Move> moves) {
-    if (moves.isEmpty || _boardState == null) return;
+    if (moves.isEmpty) return;
 
     try {
       print('设置引擎走法箭头: ${moves.length} 个着法');
@@ -757,35 +758,6 @@ class OverlayService {
         validMovesStr = validMovesStr.sublist(0, 2);
       }
 
-      final stringPV = validMovesStr.join(' ');
-      print('创建引擎信息 PV: $stringPV');
-
-      // 创建引擎信息对象，使用安全的固定评分
-      final engineInfo = EngineInfo.parse('info depth 20 seldepth 30 multipv 1 score cp 50 nodes 10000 nps 5000 hashfull 0 tbhits 0 time 2000 pv $stringPV');
-
-      // 设置引擎信息
-      _boardState?.engineInfo = engineInfo;
-
-      // 设置bestmove和ponder（如果有）
-      if (validMoves.isNotEmpty) {
-        print('设置最佳着法: ${validMoves[0].asEngineMove()}');
-        final bestMove = Bestmove(validMoves[0].asEngineMove());
-
-        // 设置ponder（如果有第二个走法）
-        if (validMoves.length >= 2) {
-          bestMove.ponder = validMoves[1].asEngineMove();
-          print('设置对方走法: ${bestMove.ponder}');
-        }
-
-        // 安全地更新bestmove
-        _boardState?.bestmove = bestMove;
-      } else {
-        _boardState?.bestmove = null;
-      }
-
-      // 通知更新UI
-      _boardState?.notifyListeners();
-
       // 通知悬浮窗更新引擎着法
       _notifyEngineMoveUpdated(validMoves);
     } catch (e) {
@@ -815,11 +787,6 @@ class OverlayService {
           return;
         }
 
-        // 保存最新的引擎分析信息
-        if (_boardState != null) {
-          _boardState!.engineInfo = resp;
-        }
-
         // 获取评估相关信息
         final score = resp.tokens['score'];
         final depth = resp.tokens['depth'];
@@ -836,8 +803,8 @@ class OverlayService {
           // 检查是否找到必胜着法等情况
           if (cpOrMate == 1 && depth >= 60) {
             try {
-              HybridEngine().stop();
-              _isEngineThinking = false;
+              // HybridEngine().stop();
+              // _isEngineThinking = false;
               print('发现必胜着法，停止引擎');
             } catch (e) {
               print('停止引擎时出错: $e');
@@ -860,16 +827,6 @@ class OverlayService {
             }
 
             if (engineMoves.isNotEmpty) {
-
-   // // 确保停止引擎
-   //      try {
-   //        HybridEngine().stop();
-   //          _isEngineThinking = false;
-   //        print('收到最佳走法2，停止引擎');
-   //      } catch (e) {
-   //        print('停止引擎出错: $e');
-   //      }
-
               // 更新引擎走法
               _engineMoves = engineMoves;
 
@@ -1106,10 +1063,6 @@ class OverlayService {
   Future<void> _stopPonder() async {
     try {
       await HybridEngine().stopPonder();
-      if (_boardState != null) {
-        _boardState!.engineInfo = null;
-        _boardState!.bestmove = null;
-      }
     } catch (e) {
       print('停止后台思考出错: $e');
     }
@@ -1128,17 +1081,9 @@ class OverlayService {
   }
 
   // 设置当前FEN和走棋方，用于引擎分析
-  void setCurrentPosition(String fen, String player, [BoardState? boardState]) {
+  void setCurrentPosition(String fen, String player) {
     _currentFen = fen;
     _currentPlayer = player;
-
-    // 如果提供了BoardState实例，保存它
-    if (boardState != null) {
-      _boardState = boardState;
-    } else if (_boardState != null) {
-      // 如果已有BoardState，更新它
-      _boardState!.load(fen, notify: true);
-    }
   }
 
   // 切换走棋方
@@ -1151,11 +1096,6 @@ class OverlayService {
       if (parts.length >= 2) {
         parts[1] = _currentPlayer == 'red' ? 'w' : 'b';
         _currentFen = parts.join(' ');
-      }
-
-      // 更新BoardState
-      if (_boardState != null) {
-        _boardState!.load(_currentFen, notify: true);
       }
     }
 
@@ -1415,6 +1355,40 @@ class OverlayService {
     } catch (e) {
       print('应用绿幕处理时出错: $e');
       return imageBytes; // 出错时返回原图
+    }
+  }
+
+  // 添加一个测试方法，用于在正常分析失败时显示箭头
+  Future<void> _testArrowDisplay() async {
+    try {
+      // 使用一个简单的残局棋盘位置
+      String testFen = '3k5/9/9/9/9/9/9/9/9/3K5 w - - 0 1';
+
+      // 更新UI显示
+      _currentFen = testFen;
+      _currentPlayer = 'red';
+
+      // 创建测试走法 - 使用明确且容易看到的走法，使用fromEngineMove避免依赖Coord
+      List<Move> testMoves = [
+        Move.fromEngineMove('d0d1'), // 红帅上移
+        Move.fromEngineMove('d9d8')  // 黑将下移
+      ];
+
+      print('测试走法：${testMoves[0].asEngineMove()} ${testMoves[1].asEngineMove()}');
+
+      _engineMoves = testMoves;
+
+      // 确保箭头显示设置已启用
+      LocalData().thinkingArrowEnabled.value = true;
+
+      // 通知UI更新
+      _engineHint = "测试箭头: 红帅上移, 黑将下移";
+      _notifyEngineHintUpdated();
+      _notifyEngineMoveUpdated(testMoves);
+
+      print('测试箭头显示完成，检查LocalData设置: ${LocalData().thinkingArrowEnabled.value}');
+    } catch (e) {
+      print('测试箭头显示出错: $e');
     }
   }
 

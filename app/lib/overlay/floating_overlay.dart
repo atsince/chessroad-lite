@@ -19,6 +19,7 @@ import '../cchess/move_name.dart';
 import '../cchess/cc_base.dart';
 import '../config/local_data.dart';
 // import '../engine/hybrid_engine.dart'; // 添加引擎导入
+import '../engine/engine.dart'; // 添加引擎导入以获取EngineInfo和Bestmove类
 import '../services/overlay_service.dart'; // 导入常量和服务定义
 
 class FloatingOverlay extends StatefulWidget {
@@ -80,6 +81,13 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
     //   // 确保始终显示箭头
     //   LocalData().thinkingArrowEnabled.value = true;
     // });
+
+    // 初始化时确保箭头显示设置开启
+    Future.microtask(() async {
+      await LocalData().load();
+      LocalData().thinkingArrowEnabled.value = true;
+      print('箭头显示设置已启用');
+    });
 
     // 初始化BoardState
     _boardState = BoardState();
@@ -237,8 +245,18 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
             try {
               List<String> moveStrings = List<String>.from(data['moves']);
               List<Move> moves = moveStrings.map((s) => Move.fromEngineMove(s)).toList();
+
+              // 记录收到的走法
+              print('收到引擎走法: $moveStrings');
+
+              // 更新状态
               setState(() {
                 _engineMoves = moves;
+              });
+
+              // 使用post-frame回调更新棋盘状态，避免在build过程中更新
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                _updateBoardWithMoves(moves);
               });
             } catch (e) {
               print('处理引擎着法更新出错: $e');
@@ -255,6 +273,11 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
               List<Move> moves = moveStrings.map((s) => Move.fromEngineMove(s.toString())).toList();
               setState(() {
                 _engineMoves = moves;
+              });
+
+              // 使用post-frame回调更新棋盘状态
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                _updateBoardWithMoves(moves);
               });
             } catch (e) {
               print('处理引擎分析走法出错: $e');
@@ -280,6 +303,11 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
               try {
                 List<dynamic> moveStrings = data['moves'];
                 _engineMoves = moveStrings.map((s) => Move.fromEngineMove(s.toString())).toList();
+
+                // 使用post-frame回调更新棋盘状态
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  _updateBoardWithMoves(_engineMoves);
+                });
               } catch (e) {
                 print('处理最终走法出错: $e');
               }
@@ -401,7 +429,11 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
               // 使用公共方法，避免访问私有成员
               List<dynamic> pvMoves = data['enginePV'];
               try {
-                _engineMoves = pvMoves.map((s) => Move.fromEngineMove(s.toString())).toList();
+                List<Move> moves = pvMoves.map((s) => Move.fromEngineMove(s.toString())).toList();
+                _engineMoves = moves;
+
+                // 使用新方法更新棋盘箭头
+                _updateBoardWithMoves(moves);
               } catch (e) {
                 print('解析走法出错: $e');
               }
@@ -702,8 +734,80 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
     }
   }
 
+  // 添加一个新方法用于更新棋盘显示箭头
+  void _updateBoardWithMoves(List<Move> moves) {
+    if (moves.isEmpty) return;
+
+    try {
+      print('更新棋盘箭头，走法数量: ${moves.length}');
+
+      // 确保箭头显示已启用
+      LocalData().thinkingArrowEnabled.value = true;
+
+      // 准备引擎信息
+      final stringPV = moves.map((m) => m.asEngineMove()).join(' ');
+      final engineInfo = EngineInfo.parse('info depth 20 seldepth 30 multipv 1 score cp 50 nodes 10000 nps 5000 hashfull 0 tbhits 0 time 2000 pv $stringPV');
+
+      // 更新BoardState
+      _boardState.engineInfo = engineInfo;
+
+      // 设置最佳走法
+      if (moves.isNotEmpty) {
+        final bestMove = Bestmove(moves[0].asEngineMove());
+        if (moves.length >= 2) {
+          bestMove.ponder = moves[1].asEngineMove();
+        }
+        _boardState.bestmove = bestMove;
+      }
+
+      // 强制刷新UI
+      Future.microtask(() {
+        _boardState.notifyListeners();
+        print('已通知棋盘状态更新，应显示箭头');
+      });
+
+      // 添加测试代码以验证箭头设置
+      print('当前箭头显示设置: ${LocalData().thinkingArrowEnabled.value}');
+    } catch (e) {
+      print('更新棋盘箭头出错: $e');
+    }
+  }
+
+  // 新增的方法：安全地在构建前更新棋盘走法
+  void _prepareEngineMoves() {
+    if (_engineMoves.isEmpty) return;
+
+    try {
+      // 确保箭头显示已启用
+      LocalData().thinkingArrowEnabled.value = true;
+
+      // 准备引擎信息
+      final stringPV = _engineMoves.map((m) => m.asEngineMove()).join(' ');
+      final engineInfo = EngineInfo.parse('info depth 20 seldepth 30 multipv 1 score cp 50 nodes 10000 nps 5000 hashfull 0 tbhits 0 time 2000 pv $stringPV');
+
+      // 直接设置到BoardState，不调用notifyListeners()
+      _boardState.engineInfo = engineInfo;
+
+      // 设置最佳走法
+      if (_engineMoves.isNotEmpty) {
+        final bestMove = Bestmove(_engineMoves[0].asEngineMove());
+        if (_engineMoves.length >= 2) {
+          bestMove.ponder = _engineMoves[1].asEngineMove();
+        }
+        _boardState.bestmove = bestMove;
+      }
+
+      print('已准备棋盘箭头数据');
+    } catch (e) {
+      print('准备棋盘箭头数据出错: $e');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    // 在build开始时准备引擎走法数据，而不是在构建过程中更新
+    _prepareEngineMoves();
+
     return ChangeNotifierProvider.value(
       value: _boardState,
       child: Stack(
@@ -940,6 +1044,10 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
                             builder: (context) {
                               // 确保ThinkingArrowEnabled值在build期间是正确的
                               LocalData().thinkingArrowEnabled.value = true;
+
+                              // 移除在build过程中调用_updateBoardWithMoves
+                              // 这是导致setState during build错误的根本原因
+
                               return createChessBoardMini(
                                 context,
                                 GameScene.battle,
