@@ -44,6 +44,7 @@ class OverlayConstants {
   static const String TYPE_ERROR = 'error';
   static const String TYPE_TOGGLE_CAPTURE = 'toggle_capture';
   static const String TYPE_OVERLAY_POSITION = 'overlay_position'; // 添加悬浮窗位置类型
+  static const String TYPE_TOGGLE_BOARD_FLIP = 'toggle_board_flip'; // 添加棋盘翻转类型
 }
 
 class OverlayService {
@@ -72,6 +73,9 @@ class OverlayService {
   String? _engineHint;
   String _currentFen = '';
   String _currentPlayer = 'red';
+
+  // 棋盘翻转状态
+  bool _isBoardFlipped = false;
 
   // 获取数据流，用于监听从悬浮窗接收到的数据
   Stream<Map<String, dynamic>> get dataStream => _dataController.stream;
@@ -209,6 +213,26 @@ class OverlayService {
         }
         break;
 
+      case OverlayConstants.TYPE_TOGGLE_BOARD_FLIP:
+        // 处理棋盘翻转请求
+        if (data.containsKey('flipped')) {
+          _isBoardFlipped = data['flipped'];
+          print('服务层收到棋盘翻转状态更新: $_isBoardFlipped');
+
+          // 如果有引擎分析结果，重新发送给悬浮窗以更新箭头
+          if (_engineMoves.isNotEmpty) {
+            _notifyEngineMoveUpdated(_engineMoves);
+          }
+
+          // 确保悬浮窗的翻转状态同步
+          _sendMessageToOverlay({
+            'type': 'set_board_flip',
+            'flipped': _isBoardFlipped,
+            'timestamp': DateTime.now().millisecondsSinceEpoch
+          });
+        }
+        break;
+
       case 'request_engine_hint':
         // 处理引擎提示请求
         requestEngineHint(_currentFen);
@@ -223,6 +247,11 @@ class OverlayService {
         // 处理设置当前局面请求
         if (data.containsKey('fen') && data.containsKey('player')) {
           setCurrentPosition(data['fen'], data['player']);
+
+          // 更新翻转状态（如果提供）
+          if (data.containsKey('flipped')) {
+            _isBoardFlipped = data['flipped'];
+          }
         }
         break;
 
@@ -493,10 +522,16 @@ class OverlayService {
 
 
           _currentFen = result.fen!;
+
+          // 确保FEN的走棋方与当前玩家一致
+          final fenParts = _currentFen.split(' ');
+          fenParts[1] = _currentPlayer == 'red' ? 'w' : 'b';
+          _currentFen = fenParts.join(' ');
+          print('已调整FEN走棋方: $_currentFen');
           // _currentFen = "2bk2b2/4R1cC1/1R7/p7p/4n4/3p1p3/P8/4BC3/4A4/4K1B2 w - - 0 1";
 
           // 更新棋盘状态
-          await updateBoard(_currentFen, currentPlayer);
+          await updateBoard(_currentFen, _currentPlayer);
 
           // // 通知主应用请求引擎分析
           await requestEngineHint(_currentFen);
@@ -529,6 +564,24 @@ class OverlayService {
     }
 
     try {
+      // Check if the overlay is already active
+      try {
+        final isAlreadyActive = await FlutterOverlayWindow.isActive();
+        if (isAlreadyActive) {
+          // If already active, close it first to ensure a clean state
+          await FlutterOverlayWindow.closeOverlay();
+          // Wait a moment for the system to process the close operation
+          await Future.delayed(const Duration(milliseconds: 500));
+        }
+      } catch (e) {
+        debugPrint('检查悬浮窗状态时出错: $e');
+        // Continue anyway since we're about to show the overlay
+      }
+
+      // Reset internal state
+      _isOverlayActive = false;
+
+      // Show the overlay with a slight delay to ensure system resources are released
       await FlutterOverlayWindow.showOverlay(
         height: 600,
         width: 500,
@@ -551,8 +604,28 @@ class OverlayService {
   }
 
   Future<void> closeOverlay() async {
-    await FlutterOverlayWindow.closeOverlay();
-    _isOverlayActive = false;
+    try {
+      // First check if overlay is active before trying to close it
+      final isActive = await FlutterOverlayWindow.isActive();
+      if (!isActive) {
+        // Already closed, just update the state
+        _isOverlayActive = false;
+        return;
+      }
+
+      // Close the overlay
+      await FlutterOverlayWindow.closeOverlay();
+
+      // Update state
+      _isOverlayActive = false;
+
+      // Give the system some time to release resources
+      await Future.delayed(const Duration(milliseconds: 300));
+    } catch (e) {
+      debugPrint('关闭悬浮窗时出错: $e');
+      // Force reset the state even if there was an error
+      _isOverlayActive = false;
+    }
   }
 
   // 发送命令到悬浮窗
@@ -573,6 +646,7 @@ class OverlayService {
     await sendCommand(OverlayConstants.CMD_UPDATE_BOARD, {
       'fen': fen,
       'player': player,
+      'flipped': _isBoardFlipped,
     });
   }
 
@@ -1010,6 +1084,7 @@ class OverlayService {
     final data = {
       'type': 'engine_hint_updated',
       'hint': _engineHint,
+      'flipped': _isBoardFlipped,
       'timestamp': DateTime.now().millisecondsSinceEpoch
     };
     _dataController.add(data);
@@ -1019,6 +1094,7 @@ class OverlayService {
       'fen': _currentFen,
       'player': _currentPlayer,
       'engineHint': _engineHint,
+      'flipped': _isBoardFlipped,
       'isEngineThinking': _isEngineThinking
     });
   }
@@ -1028,6 +1104,7 @@ class OverlayService {
     final data = {
       'type': 'engine_thinking_state_changed',
       'isThinking': _isEngineThinking,
+      'flipped': _isBoardFlipped,
       'timestamp': DateTime.now().millisecondsSinceEpoch
     };
     _dataController.add(data);
@@ -1036,6 +1113,7 @@ class OverlayService {
     sendCommand(OverlayConstants.CMD_UPDATE_BOARD, {
       'fen': _currentFen,
       'player': _currentPlayer,
+      'flipped': _isBoardFlipped,
       'isEngineThinking': _isEngineThinking
     });
   }
@@ -1047,6 +1125,7 @@ class OverlayService {
     final data = {
       'type': 'engine_move_updated',
       'moves': moveStrings,
+      'flipped': _isBoardFlipped,
       'timestamp': DateTime.now().millisecondsSinceEpoch
     };
     _dataController.add(data);
@@ -1055,6 +1134,7 @@ class OverlayService {
     sendCommand(OverlayConstants.CMD_UPDATE_BOARD, {
       'fen': _currentFen,
       'player': _currentPlayer,
+      'flipped': _isBoardFlipped,
       'enginePV': moveStrings
     });
   }
@@ -1084,6 +1164,13 @@ class OverlayService {
   void setCurrentPosition(String fen, String player) {
     _currentFen = fen;
     _currentPlayer = player;
+
+    // 将棋盘更新信息通知回悬浮窗，同步翻转状态
+    _sendMessageToOverlay({
+      'type': 'set_board_flip',
+      'flipped': _isBoardFlipped,
+      'timestamp': DateTime.now().millisecondsSinceEpoch
+    });
   }
 
   // 切换走棋方
@@ -1100,16 +1187,17 @@ class OverlayService {
     }
 
     // 重置引擎状态
-    await _stopPonder();
-    await Future.delayed(const Duration(milliseconds: 500));
-    await HybridEngine().stop();
-    await Future.delayed(const Duration(milliseconds: 500));
-    await HybridEngine().newGame();
+    // await _stopPonder();
+    // await Future.delayed(const Duration(milliseconds: 500));
+    // await HybridEngine().stop();
+    // await Future.delayed(const Duration(milliseconds: 500));
+    // await HybridEngine().newGame();
 
     // 发送更新到悬浮窗
     await sendCommand(OverlayConstants.CMD_UPDATE_BOARD, {
       'fen': _currentFen,
       'player': _currentPlayer,
+      'flipped': _isBoardFlipped,
     });
 
     // 切换后自动请求新走法提示
@@ -1390,6 +1478,56 @@ class OverlayService {
     } catch (e) {
       print('测试箭头显示出错: $e');
     }
+  }
+
+  // 添加方法，用于检查悬浮窗是否活跃
+  Future<bool> isOverlayActive() async {
+    try {
+      // 首先检查插件的isActive方法
+      final pluginReportsActive = await FlutterOverlayWindow.isActive();
+
+      // 如果插件报告活跃，但本地状态不一致，则更新本地状态
+      if (pluginReportsActive && !_isOverlayActive) {
+        _isOverlayActive = true;
+      }
+      // 反之亦然
+      else if (!pluginReportsActive && _isOverlayActive) {
+        _isOverlayActive = false;
+      }
+
+      return pluginReportsActive;
+    } catch (e) {
+      debugPrint('检查悬浮窗状态出错: $e');
+      // 发生错误时，假设悬浮窗已关闭
+      _isOverlayActive = false;
+      return false;
+    }
+  }
+
+  // 切换棋盘翻转状态
+  Future<void> toggleBoardFlip() async {
+    _isBoardFlipped = !_isBoardFlipped;
+
+    print('服务层主动切换棋盘翻转状态: $_isBoardFlipped');
+
+    // 发送翻转状态到悬浮窗
+    await _sendMessageToOverlay({
+      'type': 'set_board_flip',
+      'flipped': _isBoardFlipped,
+      'timestamp': DateTime.now().millisecondsSinceEpoch
+    });
+
+    // 如果有引擎分析结果，重新发送给悬浮窗以更新箭头
+    if (_engineMoves.isNotEmpty) {
+      _notifyEngineMoveUpdated(_engineMoves);
+    }
+
+    // 同时更新棋盘状态
+    await sendCommand(OverlayConstants.CMD_UPDATE_BOARD, {
+      'fen': _currentFen,
+      'player': _currentPlayer,
+      'flipped': _isBoardFlipped,
+    });
   }
 
   void dispose() {

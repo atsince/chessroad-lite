@@ -72,6 +72,9 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
   // 位置追踪相关
   Timer? _positionReportTimer;
 
+  // 添加棋盘翻转状态变量
+  bool _isBoardFlipped = false;
+
   @override
   void initState() {
     super.initState();
@@ -92,12 +95,15 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
     // 初始化BoardState
     _boardState = BoardState();
     _boardState.load(_boardFen, notify: true);
+    // 初始化棋盘翻转状态
+    _boardState.inverseBoard(_isBoardFlipped, notify: true);
 
     // 将BoardState传递给服务层（通过消息）
     _sendMessageToMain({
       'type': 'set_current_position',
       'fen': _boardFen,
       'player': _currentPlayer,
+      'flipped': _isBoardFlipped,
       'timestamp': DateTime.now().millisecondsSinceEpoch
     });
 
@@ -112,7 +118,8 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
       _sendMessageToMain({
         'type': 'overlay_initialized',
         'timestamp': DateTime.now().millisecondsSinceEpoch,
-        'message': '悬浮窗初始化完成'
+        'message': '悬浮窗初始化完成',
+        'flipped': _isBoardFlipped
       });
     });
 
@@ -123,16 +130,16 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
   // 设置悬浮窗接收端口
   void _setupOverlayIsolateReceiver() {
     // 注销之前的端口（如果有）
-    IsolateNameServer.removePortNameMapping(OverlayConstants.MAIN_TO_OVERLAY_PORT_NAME);
+    IsolateNameServer.removePortNameMapping(
+        OverlayConstants.MAIN_TO_OVERLAY_PORT_NAME);
 
     // 创建新的接收端口
     _overlayReceivePort = ReceivePort();
 
     // 注册接收端口
     final registered = IsolateNameServer.registerPortWithName(
-      _overlayReceivePort!.sendPort,
-      OverlayConstants.MAIN_TO_OVERLAY_PORT_NAME
-    );
+        _overlayReceivePort!.sendPort,
+        OverlayConstants.MAIN_TO_OVERLAY_PORT_NAME);
 
     if (registered) {
       print('悬浮窗接收端口注册成功');
@@ -164,7 +171,8 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
 
   // 查找主应用的SendPort
   void _findMainSendPort() {
-    _mainSendPort = IsolateNameServer.lookupPortByName(OverlayConstants.OVERLAY_TO_MAIN_PORT_NAME);
+    _mainSendPort = IsolateNameServer.lookupPortByName(
+        OverlayConstants.OVERLAY_TO_MAIN_PORT_NAME);
 
     if (_mainSendPort != null) {
       print('找到主应用的SendPort');
@@ -173,7 +181,8 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
 
       // 5秒后重试一次
       Future.delayed(const Duration(seconds: 5), () {
-        _mainSendPort = IsolateNameServer.lookupPortByName(OverlayConstants.OVERLAY_TO_MAIN_PORT_NAME);
+        _mainSendPort = IsolateNameServer.lookupPortByName(
+            OverlayConstants.OVERLAY_TO_MAIN_PORT_NAME);
         if (_mainSendPort != null) {
           print('重试后找到主应用的SendPort');
         }
@@ -244,7 +253,8 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
           if (data.containsKey('moves')) {
             try {
               List<String> moveStrings = List<String>.from(data['moves']);
-              List<Move> moves = moveStrings.map((s) => Move.fromEngineMove(s)).toList();
+              List<Move> moves =
+                  moveStrings.map((s) => Move.fromEngineMove(s)).toList();
 
               // 记录收到的走法
               print('收到引擎走法: $moveStrings');
@@ -264,13 +274,31 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
           }
           break;
 
+        case 'set_board_flip':
+          // 处理来自主应用的棋盘翻转消息
+          if (data.containsKey('flipped')) {
+            final bool flipped = data['flipped'];
+            if (flipped != _isBoardFlipped) {
+              setState(() {
+                _isBoardFlipped = flipped;
+                // 更新BoardState的翻转状态
+                _boardState.inverseBoard(_isBoardFlipped, notify: true);
+                print('从主应用接收到棋盘翻转状态: $_isBoardFlipped');
+              });
+            }
+          }
+          break;
+
         case 'engine_analysis_update':
           // 处理引擎分析过程更新
-          print('收到引擎分析更新: 深度=${data['depth']}, 评分=${data['score']}, 判断=${data['judgement']}');
+          print(
+              '收到引擎分析更新: 深度=${data['depth']}, 评分=${data['score']}, 判断=${data['judgement']}');
           if (data.containsKey('moves')) {
             try {
               List<dynamic> moveStrings = data['moves'];
-              List<Move> moves = moveStrings.map((s) => Move.fromEngineMove(s.toString())).toList();
+              List<Move> moves = moveStrings
+                  .map((s) => Move.fromEngineMove(s.toString()))
+                  .toList();
               setState(() {
                 _engineMoves = moves;
               });
@@ -287,7 +315,8 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
 
         case 'engine_analysis_complete':
           // 处理引擎分析完成
-          print('引擎分析完成: ${data['chineseMove'] ?? data['bestMove'] ?? data['message'] ?? "无结果"}');
+          print(
+              '引擎分析完成: ${data['chineseMove'] ?? data['bestMove'] ?? data['message'] ?? "无结果"}');
           setState(() {
             _isEngineThinking = false;
             if (data.containsKey('chineseMove')) {
@@ -302,7 +331,9 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
             if (data.containsKey('moves')) {
               try {
                 List<dynamic> moveStrings = data['moves'];
-                _engineMoves = moveStrings.map((s) => Move.fromEngineMove(s.toString())).toList();
+                _engineMoves = moveStrings
+                    .map((s) => Move.fromEngineMove(s.toString()))
+                    .toList();
 
                 // 使用post-frame回调更新棋盘状态
                 WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -429,7 +460,9 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
               // 使用公共方法，避免访问私有成员
               List<dynamic> pvMoves = data['enginePV'];
               try {
-                List<Move> moves = pvMoves.map((s) => Move.fromEngineMove(s.toString())).toList();
+                List<Move> moves = pvMoves
+                    .map((s) => Move.fromEngineMove(s.toString()))
+                    .toList();
                 _engineMoves = moves;
 
                 // 使用新方法更新棋盘箭头
@@ -483,7 +516,8 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
       }
 
       // 如果IsolateNameServer不可用，尝试重新获取SendPort
-      _mainSendPort = IsolateNameServer.lookupPortByName(OverlayConstants.OVERLAY_TO_MAIN_PORT_NAME);
+      _mainSendPort = IsolateNameServer.lookupPortByName(
+          OverlayConstants.OVERLAY_TO_MAIN_PORT_NAME);
       if (_mainSendPort != null) {
         _mainSendPort!.send(jsonData);
         print('使用刷新后的IsolateNameServer发送消息到主应用: $jsonData');
@@ -510,7 +544,8 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
   }
 
   // 发送截图分析结果到主应用
-  Future<void> _sendAnalysisResult(String fen, String currentPlayer, [String? engineHint]) async {
+  Future<void> _sendAnalysisResult(String fen, String currentPlayer,
+      [String? engineHint]) async {
     final data = {
       'type': OverlayConstants.TYPE_ANALYSIS_RESULT,
       'fen': fen,
@@ -528,7 +563,8 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
   // 发送状态更新到主应用
   Future<void> _sendStatusUpdate(String status, [bool isError = false]) async {
     final data = {
-      'type': isError ? OverlayConstants.TYPE_ERROR : OverlayConstants.TYPE_STATUS,
+      'type':
+          isError ? OverlayConstants.TYPE_ERROR : OverlayConstants.TYPE_STATUS,
       'message': status,
       'timestamp': DateTime.now().millisecondsSinceEpoch,
     };
@@ -587,7 +623,8 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
     // 发送切换捕获命令
     Map<String, dynamic> toggleData = {
       'type': OverlayConstants.TYPE_TOGGLE_CAPTURE,
-      'isCapturing': !_isCapturing, // Invert the current state to send the new desired state
+      'isCapturing':
+          !_isCapturing, // Invert the current state to send the new desired state
       'timestamp': DateTime.now().millisecondsSinceEpoch
     };
 
@@ -677,7 +714,8 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
       _reportOverlayPosition();
 
       // 每5秒报告一次位置
-      _positionReportTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
+      _positionReportTimer =
+          Timer.periodic(const Duration(seconds: 5), (timer) {
         if (mounted) {
           _reportOverlayPosition();
         } else {
@@ -708,14 +746,14 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
         final double dpX = position.x ?? 0.0;
         final double dpY = position.y ?? 0.0;
 
-
         // 将dp转换为物理像素值
         final double physicalX = dpX * devicePixelRatio;
         final double physicalY = dpY * devicePixelRatio;
         final double physicalWidth = _currentWidth;
         final double physicalHeight = _currentHeight;
 
-        print('悬浮窗位置: dp=($dpX, $dpY), $devicePixelRatio  物理像素=($physicalX, $physicalY), 物理像素=${physicalWidth}x${physicalHeight}');
+        print(
+            '悬浮窗位置: dp=($dpX, $dpY), $devicePixelRatio  物理像素=($physicalX, $physicalY), 物理像素=${physicalWidth}x${physicalHeight}');
 
         // 发送位置信息到主应用
         _sendMessageToMain({
@@ -746,10 +784,16 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
 
       // 准备引擎信息
       final stringPV = moves.map((m) => m.asEngineMove()).join(' ');
-      final engineInfo = EngineInfo.parse('info depth 20 seldepth 30 multipv 1 score cp 50 nodes 10000 nps 5000 hashfull 0 tbhits 0 time 2000 pv $stringPV');
+      final engineInfo = EngineInfo.parse(
+          'info depth 20 seldepth 30 multipv 1 score cp 50 nodes 10000 nps 5000 hashfull 0 tbhits 0 time 2000 pv $stringPV');
 
       // 更新BoardState
       _boardState.engineInfo = engineInfo;
+
+      // 确保翻转状态一致
+      if (_boardState.boardInversed != _isBoardFlipped) {
+        _boardState.inverseBoard(_isBoardFlipped, notify: false);
+      }
 
       // 设置最佳走法
       if (moves.isNotEmpty) {
@@ -768,6 +812,7 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
 
       // 添加测试代码以验证箭头设置
       print('当前箭头显示设置: ${LocalData().thinkingArrowEnabled.value}');
+      print('当前棋盘翻转状态: ${_boardState.boardInversed}');
     } catch (e) {
       print('更新棋盘箭头出错: $e');
     }
@@ -783,10 +828,16 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
 
       // 准备引擎信息
       final stringPV = _engineMoves.map((m) => m.asEngineMove()).join(' ');
-      final engineInfo = EngineInfo.parse('info depth 20 seldepth 30 multipv 1 score cp 50 nodes 10000 nps 5000 hashfull 0 tbhits 0 time 2000 pv $stringPV');
+      final engineInfo = EngineInfo.parse(
+          'info depth 20 seldepth 30 multipv 1 score cp 50 nodes 10000 nps 5000 hashfull 0 tbhits 0 time 2000 pv $stringPV');
 
       // 直接设置到BoardState，不调用notifyListeners()
       _boardState.engineInfo = engineInfo;
+
+      // 确保翻转状态一致
+      if (_boardState.boardInversed != _isBoardFlipped) {
+        _boardState.inverseBoard(_isBoardFlipped, notify: false);
+      }
 
       // 设置最佳走法
       if (_engineMoves.isNotEmpty) {
@@ -803,6 +854,25 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
     }
   }
 
+  void _toggleBoardFlip() {
+    // 实现棋盘翻转逻辑
+    setState(() {
+      _isBoardFlipped = !_isBoardFlipped;
+
+      // 更新BoardState的翻转状态
+      _boardState.inverseBoard(_isBoardFlipped, notify: true);
+
+      // 发送翻转状态到主应用
+      _sendMessageToMain({
+        'type': OverlayConstants.TYPE_TOGGLE_BOARD_FLIP,
+        'flipped': _isBoardFlipped,
+        'timestamp': DateTime.now().millisecondsSinceEpoch
+      });
+
+      print('棋盘翻转状态已切换: $_isBoardFlipped');
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     // 在build开始时准备引擎走法数据，而不是在构建过程中更新
@@ -816,7 +886,7 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
             clipChild: false,
             focalPointAlignment: Alignment.center,
             shouldRotate: false, // 禁用旋转
-            shouldScale: false,   // 允许缩放
+            shouldScale: false, // 允许缩放
             shouldTranslate: true, // 允许平移
             onMatrixUpdate: _handleMatrixUpdate,
             child: AnimatedContainer(
@@ -825,91 +895,9 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
               height: _currentHeight,
               decoration: BoxDecoration(
                 color: Colors.black.withOpacity(0.9),
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.3),
-                    spreadRadius: 1,
-                    blurRadius: 4,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
               ),
-              child: Column(
+              child: Row(
                 children: [
-                  // 顶部操作栏 - 减小高度
-                  Container(
-                    height: _currentScale * 40, // 从50减小到40
-                    padding: EdgeInsets.symmetric(horizontal: 4 * _currentScale, vertical: 0), // 减小垂直padding
-                    decoration: BoxDecoration(
-                      color: Colors.grey[800],
-                      borderRadius: BorderRadius.only(
-                        topLeft: Radius.circular(16),
-                        topRight: Radius.circular(16),
-                      ),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        // 标题
-                        Expanded(
-                          child: Text(
-                            '象棋识别悬浮窗',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 16 * _currentScale, // 从18减小到16
-                              fontWeight: FontWeight.bold,
-                            ),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        // 操作按钮
-                        Row(
-                          children: [
-                            // 切换红黑方按钮
-                            IconButton(
-                              padding: EdgeInsets.zero,
-                              constraints: BoxConstraints(),
-                              iconSize: 22 * _currentScale, // 从24减小到22
-                              icon: Icon(
-                                Icons.swap_horiz,
-                                color: _currentPlayer == 'red' ? Colors.red : Colors.white,
-                              ),
-                              onPressed: _togglePlayer,
-                              tooltip: '切换走棋方',
-                            ),
-                            SizedBox(width: 4 * _currentScale),
-                            // 开始/停止按钮
-                            IconButton(
-                              padding: EdgeInsets.zero,
-                              constraints: BoxConstraints(),
-                              iconSize: 22 * _currentScale, // 从24减小到22
-                              icon: Icon(
-                                _isCapturing ? Icons.stop : Icons.play_arrow,
-                                color: _isCapturing ? Colors.red : Colors.green,
-                              ),
-                              onPressed: _toggleCapturing,
-                              tooltip: _isCapturing ? '停止捕捉' : '开始捕捉',
-                            ),
-                            SizedBox(width: 4 * _currentScale),
-                            // 关闭按钮
-                            IconButton(
-                              padding: EdgeInsets.zero,
-                              constraints: BoxConstraints(),
-                              iconSize: 22 * _currentScale, // 从24减小到22
-                              icon: const Icon(
-                                Icons.close,
-                                color: Colors.white,
-                              ),
-                              onPressed: _closeOverlay,
-                              tooltip: '关闭悬浮窗',
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-
                   // 棋盘区域
                   Expanded(
                     child: Column(
@@ -919,12 +907,16 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
                           decoration: BoxDecoration(
                             color: Colors.grey[100],
                             border: Border(
-                              bottom: BorderSide(color: Colors.grey.shade400, width: 1),
+                              bottom: BorderSide(
+                                  color: Colors.grey.shade400, width: 1),
                             ),
                           ),
                           width: double.infinity,
-                          padding: EdgeInsets.symmetric(horizontal: 4 * _currentScale, vertical: 2 * _currentScale), // 大幅减小padding
-                          child: Row(  // 改成Row布局以减少高度
+                          padding: EdgeInsets.symmetric(
+                              horizontal: 4 * _currentScale,
+                              vertical: 2 * _currentScale), // 大幅减小padding
+                          child: Row(
+                            // 改成Row布局以减少高度
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
                               // 左侧：走棋方和提示
@@ -935,104 +927,38 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
                                       '${_currentPlayer == 'red' ? '红方' : '黑方'}:',
                                       style: TextStyle(
                                         fontWeight: FontWeight.bold,
-                                        color: _currentPlayer == 'red' ? Colors.red[700] : Colors.grey[800],
+                                        color: _currentPlayer == 'red'
+                                            ? Colors.red[700]
+                                            : Colors.grey[800],
                                         fontSize: 13 * _currentScale, // 减小字体
                                       ),
                                     ),
                                     SizedBox(width: 4 * _currentScale),
                                     Expanded(
                                       child: _engineHint != null
-                                        ? Text(
-                                            _engineHint!,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: TextStyle(
-                                              fontFamily: 'monospace',
-                                              fontSize: 14 * _currentScale, // 减小字体
-                                              color: _currentPlayer == 'red' ? Colors.red[800] : Colors.black,
+                                          ? Text(
+                                              _engineHint!,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: TextStyle(
+                                                fontFamily: 'monospace',
+                                                fontSize:
+                                                    14 * _currentScale, // 减小字体
+                                                color: _currentPlayer == 'red'
+                                                    ? Colors.red[800]
+                                                    : Colors.black,
+                                              ),
+                                            )
+                                          : Text(
+                                              _isEngineThinking ? '思考中...' : '',
+                                              style: TextStyle(
+                                                fontSize:
+                                                    13 * _currentScale, // 减小字体
+                                                color: Colors.grey[600],
+                                              ),
                                             ),
-                                          )
-                                        : Text(
-                                            _isEngineThinking ? '思考中...' : '',
-                                            style: TextStyle(
-                                              fontSize: 13 * _currentScale, // 减小字体
-                                              color: Colors.grey[600],
-                                            ),
-                                          ),
                                     ),
                                   ],
                                 ),
-                              ),
-
-                              // 右侧：控制按钮
-                              Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  // 提示按钮
-                                  Material(
-                                    color: Colors.transparent,
-                                    child: InkWell(
-                                      onTap: (){
-                                        print("引擎提示请求已发送到服务层");
-                                        // 使用消息通知服务层请求引擎提示
-                                        _sendMessageToMain({
-                                          'type': 'request_engine_hint',
-                                          'timestamp': DateTime.now().millisecondsSinceEpoch
-                                        });
-                                      },
-                                      borderRadius: BorderRadius.circular(4 * _currentScale),
-                                      child: Container(
-                                        padding: EdgeInsets.symmetric(
-                                          horizontal: 6 * _currentScale,
-                                          vertical: 2 * _currentScale,
-                                        ),
-                                        decoration: BoxDecoration(
-                                          color: Colors.blue,
-                                          borderRadius: BorderRadius.circular(4 * _currentScale),
-                                        ),
-                                        child: _isEngineThinking
-                                          ? Row(
-                                              mainAxisSize: MainAxisSize.min,
-                                              children: [
-                                                SizedBox(
-                                                  width: 10 * _currentScale, // 从12减小到10
-                                                  height: 10 * _currentScale, // 从12减小到10
-                                                  child: CircularProgressIndicator(
-                                                    strokeWidth: 1.5 * _currentScale, // 从2减小到1.5
-                                                    color: Colors.white,
-                                                  ),
-                                                ),
-                                                SizedBox(width: 3 * _currentScale), // 从4减小到3
-                                                Text(
-                                                  '思考中',
-                                                  style: TextStyle(
-                                                    color: Colors.white,
-                                                    fontSize: 11 * _currentScale, // 从12减小到11
-                                                  ),
-                                                ),
-                                              ],
-                                            )
-                                          : Row(
-                                              mainAxisSize: MainAxisSize.min,
-                                              children: [
-                                                Icon(
-                                                  Icons.flash_on,
-                                                  size: 12 * _currentScale, // 从14减小到12
-                                                  color: Colors.white,
-                                                ),
-                                                SizedBox(width: 2 * _currentScale),
-                                                Text(
-                                                  '提示',  // 简化文字
-                                                  style: TextStyle(
-                                                    color: Colors.white,
-                                                    fontSize: 11 * _currentScale, // 从12减小到11
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                      ),
-                                    ),
-                                  ),
-                                ],
                               ),
                             ],
                           ),
@@ -1040,24 +966,194 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
 
                         // 棋盘部分 - 使用createChessBoard函数
                         Expanded(
-                          child: Builder(
-                            builder: (context) {
-                              // 确保ThinkingArrowEnabled值在build期间是正确的
-                              LocalData().thinkingArrowEnabled.value = true;
+                          child: Builder(builder: (context) {
+                            // 确保ThinkingArrowEnabled值在build期间是正确的
+                            LocalData().thinkingArrowEnabled.value = true;
 
-                              // 移除在build过程中调用_updateBoardWithMoves
-                              // 这是导致setState during build错误的根本原因
-
-                              return createChessBoardMini(
-                                context,
-                                GameScene.battle,
-                                opponentHuman: false,
-                              );
+                            // 确保BoardState的翻转状态和当前状态一致
+                            if (_boardState.boardInversed != _isBoardFlipped) {
+                              _boardState.inverseBoard(_isBoardFlipped,
+                                  notify: false);
                             }
-                          ),
+
+                            return createChessBoardMini(
+                              context,
+                              GameScene.battle,
+                              onBoardTap: null,
+                              opponentHuman: false,
+                            );
+                          }),
                         ),
                       ],
                     ),
+                  ),
+
+                  // 操作按钮
+                  Column(
+                    children: [
+                      // 切换红黑方按钮
+                      GestureDetector(
+                        onTap: _togglePlayer,
+                        child: Container(
+                          padding:
+                              EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: Colors.green,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            _currentPlayer == 'red' ? '红走' : '黑走',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 12 * _currentScale,
+                            ),
+                          ),
+                        ),
+                      ),
+                      SizedBox(height: 4 * _currentScale),
+                      // 开始/停止按钮
+                      GestureDetector(
+                        onTap: _toggleCapturing,
+                        child: Container(
+                          padding:
+                              EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: Colors.green,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            _isCapturing ? '停止' : '开始',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 12 * _currentScale,
+                            ),
+                          ),
+                        ),
+                      ),
+                      SizedBox(height: 4 * _currentScale),
+
+                      GestureDetector(
+                        onTap: _toggleBoardFlip,
+                        child: Container(
+                          padding:
+                              EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: Colors.green,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            '翻转',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 12 * _currentScale,
+                            ),
+                          ),
+                        ),
+                      ),
+                      SizedBox(height: 4 * _currentScale),
+                      // 关闭按钮
+                      GestureDetector(
+                        onTap: _closeOverlay,
+                        child: Container(
+                          padding:
+                              EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: Colors.green,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            '关闭',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 12 * _currentScale,
+                            ),
+                          ),
+                        ),
+                      ),
+                      SizedBox(height: 4 * _currentScale),
+                      // 右侧：控制按钮
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          // 提示按钮
+                          Material(
+                            color: Colors.transparent,
+                            child: InkWell(
+                              onTap: () {
+                                print("引擎提示请求已发送到服务层");
+                                // 使用消息通知服务层请求引擎提示
+                                _sendMessageToMain({
+                                  'type': 'request_engine_hint',
+                                  'timestamp':
+                                      DateTime.now().millisecondsSinceEpoch
+                                });
+                              },
+                              borderRadius:
+                                  BorderRadius.circular(4 * _currentScale),
+                              child: Container(
+                                padding: EdgeInsets.symmetric(
+                                  horizontal: 6 * _currentScale,
+                                  vertical: 6 * _currentScale,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.blue,
+                                  borderRadius:
+                                      BorderRadius.circular(4 * _currentScale),
+                                ),
+                                child: _isEngineThinking
+                                    ? Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          SizedBox(
+                                            width:
+                                                10 * _currentScale, // 从12减小到10
+                                            height:
+                                                10 * _currentScale, // 从12减小到10
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 1.5 *
+                                                  _currentScale, // 从2减小到1.5
+                                              color: Colors.white,
+                                            ),
+                                          ),
+                                          SizedBox(
+                                              width:
+                                                  3 * _currentScale), // 从4减小到3
+                                          Text(
+                                            '思考中',
+                                            style: TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 11 *
+                                                  _currentScale, // 从12减小到11
+                                            ),
+                                          ),
+                                        ],
+                                      )
+                                    : Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(
+                                            Icons.flash_on,
+                                            size:
+                                                12 * _currentScale, // 从14减小到12
+                                            color: Colors.white,
+                                          ),
+                                          SizedBox(width: 2 * _currentScale),
+                                          Text(
+                                            '提示', // 简化文字
+                                            style: TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 11 *
+                                                  _currentScale, // 从12减小到11
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -1093,7 +1189,8 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
 
     // 清理IsolateNameServer相关资源
     _overlayReceivePort?.close();
-    IsolateNameServer.removePortNameMapping(OverlayConstants.MAIN_TO_OVERLAY_PORT_NAME);
+    IsolateNameServer.removePortNameMapping(
+        OverlayConstants.MAIN_TO_OVERLAY_PORT_NAME);
 
     // 发送关闭消息
     try {
