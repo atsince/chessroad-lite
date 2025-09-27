@@ -873,6 +873,14 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
     });
   }
 
+  // 发送截图请求到主应用
+  Future<void> _requestScreenshot() async {
+    await _sendMessageToMain({
+      'type': 'request_screenshot',
+      'timestamp': DateTime.now().millisecondsSinceEpoch
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     // 在build开始时准备引擎走法数据，而不是在构建过程中更新
@@ -1152,6 +1160,40 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
                             ),
                           ),
                         ],
+                      ),
+
+                      // 添加拍照按钮
+                      SizedBox(height: 8 * _currentScale),
+                      GestureDetector(
+                        onTap: _requestScreenshot,
+                        child: Container(
+                          padding: EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 5
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.green,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.camera_alt,
+                                size: 12 * _currentScale,
+                                color: Colors.white,
+                              ),
+                              SizedBox(width: 4 * _currentScale),
+                              Text(
+                                '拍照',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12 * _currentScale,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
                     ],
                   ),

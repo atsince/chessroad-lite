@@ -54,7 +54,8 @@ class OverlayService {
 
   bool _isOverlayActive = false;
   bool _isCapturing = false;
-  String _apiUrl = "http://49.233.44.201:39009/api/chess/detect";
+  // String _apiUrl = "http://49.233.44.201:39009/api/chess/detect";
+  String _apiUrl = "http://192.168.109.202:39009/api/chess/detect";
   var screenShot2 = MediaProjectionScreenshot();
   StreamSubscription? _captureStreamSubscription;
   DateTime? _lastCaptureTime;
@@ -255,6 +256,11 @@ class OverlayService {
         }
         break;
 
+      case 'request_screenshot':
+        // 处理单次截图请求
+        takeCapturing();
+        break;
+
       // 其他消息类型的处理...
     }
   }
@@ -278,9 +284,83 @@ class OverlayService {
     }
   }
 
+  // 用于定时截图的Timer
+  Future<void> takeCapturing() async {
+    // 如果已经在捕获中，直接返回
+    if (_isCapturing) return;
+
+    final hasPermission = await requestScreenCapturePermission();
+    if (!hasPermission) {
+      await showError('无法获取截屏权限');
+      return;
+    }
+
+    try {
+      _isCapturing = true;
+
+      // 发送捕获开始状态消息
+      _dataController.add({
+        'type': 'capture_started',
+        'timestamp': DateTime.now().millisecondsSinceEpoch
+      });
+
+      await sendStatusUpdate('开始拍照识别...');
+
+      // 简化截屏方法，直接获取数据
+      CapturedImage? captureData = await screenShot2.takeCapture();
+
+      if (captureData == null) {
+        await showError('截图失败，返回数据为null');
+        return;
+      }
+
+      // 获取图像数据
+      Uint8List? imageBytes;
+
+      // CapturedImage类型直接获取bytes属性
+      imageBytes = captureData.bytes;
+
+      if (imageBytes == null || imageBytes.isEmpty) {
+        await showError('截图成功但数据为空');
+        return;
+      }
+
+      debugPrint('截图成功，开始处理数据 - ${DateTime.now().millisecondsSinceEpoch}');
+
+      // 判断是否需要绿幕处理
+      Uint8List processedImageBytes = imageBytes;
+      if (_overlayRect != null) {
+        processedImageBytes = await _applyGreenScreenToOverlayArea(processedImageBytes);
+      }
+
+      // 保存处理后的截图到临时文件
+      final tempFile = await _saveScreenshotToTemp(processedImageBytes);
+      final fileSize = await tempFile.length();
+      debugPrint('临时文件大小: ${fileSize} bytes');
+
+      // 上传截图到棋盘识别服务
+      await _recognizeBoard(tempFile);
+
+    } catch (e) {
+      debugPrint('截图或处理过程出错: $e');
+      await showError('截图出错: $e');
+    } finally {
+      // 完成后将状态重置为非捕获状态
+      _isCapturing = false;
+
+      // 发送捕获结束状态消息
+      _dataController.add({
+        'type': 'capture_stopped',
+        'timestamp': DateTime.now().millisecondsSinceEpoch
+      });
+
+      await sendStatusUpdate('拍照识别完成');
+    }
+  }
+
   Future<void> startCapturing({int intervalSeconds = 1}) async {
-    // 先测试箭头显示功能
-    await _testArrowDisplay();
+    // // 先测试箭头显示功能
+    // await _testArrowDisplay();
 
     // 然后继续正常流程
     if (_isCapturing) return;
@@ -735,13 +815,9 @@ class OverlayService {
 
     print('请求引擎提示，走棋方: ${_currentPlayer == 'red' ? '红方' : '黑方'}');
 
-    // // 引擎分析超时管理
-    // Timer? analysisTimeout;
-
     try {
       // 先停止任何正在进行的引擎分析
       await _stopPonder();
-      // await Future.delayed(const Duration(milliseconds: 1000));
 
 
 
@@ -753,23 +829,6 @@ class OverlayService {
         await Future.delayed(const Duration(milliseconds: 100));
       }
       await HybridEngine().newGame();
-      // await Future.delayed(const Duration(milliseconds: 1000));
-      // // 设置超时保护
-      // analysisTimeout = Timer(const Duration(seconds: 5), () {
-      //   print('引擎分析超时(3秒)，停止分析');
-      //   try {
-      //     HybridEngine().stop();
-      //     print('停止引擎');
-      //     _isEngineThinking = false;
-      //     _engineHint = "分析超时，请重试";
-      //     _notifyEngineHintUpdated();
-      //   } catch (e) {
-      //     print('停止超时引擎出错: $e');
-      //     _isEngineThinking = false;
-      //     _engineHint = "停止分析出错";
-      //     _notifyEngineHintUpdated();
-      //   }
-      // });
 
       print('开始引擎分析: ${fen}');
       print('开始引擎分析2: ${position.lastCapturedPosition}');
@@ -779,8 +838,6 @@ class OverlayService {
 
     } catch (e) {
       print('请求引擎提示时出错: $e');
-      // 清除超时定时器
-      // analysisTimeout?.cancel();
 
       _isEngineThinking = false;
       _engineHint = "引擎分析出错，请重试";
