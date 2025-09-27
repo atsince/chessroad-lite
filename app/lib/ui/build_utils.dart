@@ -8,7 +8,7 @@ import '../routes/settings/settings_page.dart';
 import 'board/thinking_board_widget.dart';
 import 'ruler.dart';
 
-const _paddingH = 10.0;
+const _paddingH = 5.0;  // 减少水平边距，为更大的棋盘腾出空间
 
 double _additionPaddingH = 0;
 
@@ -112,7 +112,7 @@ Widget createChessBoardMini(BuildContext context, GameScene scene,
   // 对于迷你棋盘，设置自定义的ThinkingBoardWidget
   final boardWidget = MiniThinkingBoardWidget(
     // width - _paddingH * 2,
-    width - _paddingH * 2+ 30,
+    width - _paddingH * 2 + 60,  // 增加棋盘宽度
     onBoardTap,
     opponentHuman: opponentHuman,
   );
@@ -123,7 +123,7 @@ Widget createChessBoardMini(BuildContext context, GameScene scene,
         horizontal: 0,
         vertical: 0,
       ),
-      height: 280,
+      height: 300,  // 增加容器高度
       // 移除绿色背景，使用透明背景以减少重绘
       color: Colors.green,
       child: boardWidget,
@@ -143,7 +143,7 @@ Widget createChessBoard(BuildContext context, GameScene scene,
   }
 
   final boardWidget = ThinkingBoardWidget(
-    width - _paddingH * 2,
+    width - _paddingH * 2 + 60,  // 增加常规棋盘宽度
     onBoardTap,
     opponentHuman: opponentHuman,
   );
