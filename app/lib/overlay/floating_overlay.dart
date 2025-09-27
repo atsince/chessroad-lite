@@ -48,8 +48,8 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
   // 添加BoardState以支持棋盘绘制
   late BoardState _boardState;
 
-  // 基础尺寸，缩放基于此尺寸
-  final double _baseWidth = 500.0;
+  // 基础尺寸，缩放基于此尺寸 - 增加悬浮窗宽度
+  final double _baseWidth = 800.0;  // 从500增加到700
   final double _baseHeight = 600.0;
 
   double get _currentWidth => _baseWidth * _currentScale;

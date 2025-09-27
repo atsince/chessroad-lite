@@ -664,7 +664,7 @@ class OverlayService {
       // Show the overlay with a slight delay to ensure system resources are released
       await FlutterOverlayWindow.showOverlay(
         height: 600,
-        width: 500,
+        width: 800,  // 增加悬浮窗宽度匹配内部设置
         alignment: OverlayAlignment.topLeft,
         flag: OverlayFlag.defaultFlag,
         visibility: NotificationVisibility.visibilityPrivate,
