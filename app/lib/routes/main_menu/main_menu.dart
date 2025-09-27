@@ -242,6 +242,15 @@ class MainMenuState extends State<MainMenu>
           }
           break;
 
+        case 'request_screenshot':
+          // 悬浮窗请求手动截屏，服务层会统一处理
+          break;
+
+        case OverlayConstants.TYPE_OVERLAY_POSITION:
+        case OverlayConstants.TYPE_TOGGLE_BOARD_FLIP:
+          // 暂时无需在主菜单中额外处理，避免误报未知类型
+          break;
+
         default:
           print('收到未知类型的悬浮窗消息: $type');
           break;

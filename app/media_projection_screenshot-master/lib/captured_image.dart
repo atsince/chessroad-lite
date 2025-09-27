@@ -26,17 +26,41 @@ class CapturedImage {
   });
 
   factory CapturedImage.fromMap(Map<String, dynamic> map) {
+    Uint8List ensureBytes(dynamic value) {
+      if (value is Uint8List) {
+        return value;
+      }
+      if (value is List<int>) {
+        return Uint8List.fromList(value);
+      }
+      return Uint8List(0);
+    }
+
+    int readInt(String key) {
+      final dynamic value = map[key];
+      if (value is int) {
+        return value;
+      }
+      if (value is num) {
+        return value.toInt();
+      }
+      return 0;
+    }
+
+    final Uint8List bytes = ensureBytes(map['bytes']);
+    final Uint8List nv21 = ensureBytes(map['nv21']);
+
     return CapturedImage(
-      bytes: map['bytes'],
-      nv21: map['nv21'],
-      width: map['width'],
-      height: map['height'],
-      rowBytes: map['rowBytes'],
-      pixelStride: map['pixelStride'],
-      rowStride: map['rowStride'],
-      format: map['format'],
-      time: map['time'],
-      queue: map['queue'],
+      bytes: bytes,
+      nv21: nv21,
+      width: readInt('width'),
+      height: readInt('height'),
+      rowBytes: readInt('rowBytes'),
+      pixelStride: readInt('pixelStride'),
+      rowStride: readInt('rowStride'),
+      format: (map['format'] as String?) ?? '',
+      time: readInt('time'),
+      queue: readInt('queue'),
     );
   }
 

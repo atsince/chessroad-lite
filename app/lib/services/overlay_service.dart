@@ -257,8 +257,15 @@ class OverlayService {
         break;
 
       case 'request_screenshot':
-        // 处理单次截图请求
-        takeCapturing();
+        // 处理手动截屏+识别+分析请求
+        if (_isCapturing) {
+          // 只有在手动模式启用时才执行
+          print('收到手动截屏请求，开始执行截屏+识别+分析');
+          manualCapture();
+        } else {
+          print('手动模式未启用，请先点击开始按钮');
+          sendStatusUpdate('请先点击开始按钮启用手动模式');
+        }
         break;
 
       // 其他消息类型的处理...
@@ -281,6 +288,74 @@ class OverlayService {
     } catch (e) {
       debugPrint('请求截屏权限失败: $e');
       return false;
+    }
+  }
+
+  // 专门用于手动模式的截屏方法
+  Future<void> manualCapture() async {
+    final hasPermission = await requestScreenCapturePermission();
+    if (!hasPermission) {
+      await showError('无法获取截屏权限');
+      return;
+    }
+
+    try {
+      await sendStatusUpdate('开始手动截屏识别...');
+
+      // 简化截屏方法，直接获取数据
+      CapturedImage? captureData = await screenShot2.takeCapture();
+
+      if (captureData == null) {
+        await showError('截图失败，返回数据为null');
+        return;
+      }
+
+      // 获取图像数据 - 优先使用bytes，如果为空则尝试nv21
+      Uint8List? imageBytes;
+
+      try {
+        imageBytes = captureData.bytes;
+      } catch (e) {
+        debugPrint('获取bytes失败: $e，尝试使用nv21');
+      }
+
+      // 如果bytes为空或出错，尝试使用nv21
+      if (imageBytes == null || imageBytes.isEmpty) {
+        try {
+          imageBytes = captureData.nv21;
+          debugPrint('使用nv21数据，长度: ${imageBytes?.length}');
+        } catch (e) {
+          debugPrint('获取nv21也失败: $e');
+        }
+      }
+
+      if (imageBytes == null || imageBytes.isEmpty) {
+        await showError('截图成功但数据为空（bytes和nv21都为空）');
+        return;
+      }
+
+      debugPrint('手动截图成功，数据长度: ${imageBytes.length}，开始处理 - ${DateTime.now().millisecondsSinceEpoch}');
+
+      // 判断是否需要绿幕处理
+      Uint8List processedImageBytes = imageBytes;
+      if (_overlayRect != null) {
+        processedImageBytes = await _applyGreenScreenToOverlayArea(processedImageBytes);
+      }
+
+      // 保存处理后的截图到临时文件
+      final tempFile = await _saveScreenshotToTemp(processedImageBytes);
+      final fileSize = await tempFile.length();
+      debugPrint('临时文件大小: ${fileSize} bytes');
+
+      // 上传截图到棋盘识别服务
+      await _recognizeBoard(tempFile);
+
+    } catch (e, stackTrace) {
+      debugPrint('手动截图或处理过程出错: $e');
+      debugPrint('堆栈跟踪: $stackTrace');
+      await showError('手动截图出错: $e');
+    } finally {
+      await sendStatusUpdate('手动截屏识别完成');
     }
   }
 
@@ -315,10 +390,7 @@ class OverlayService {
       }
 
       // 获取图像数据
-      Uint8List? imageBytes;
-
-      // CapturedImage类型直接获取bytes属性
-      imageBytes = captureData.bytes;
+      Uint8List? imageBytes = captureData.bytes;
 
       if (imageBytes == null || imageBytes.isEmpty) {
         await showError('截图成功但数据为空');
@@ -359,10 +431,7 @@ class OverlayService {
   }
 
   Future<void> startCapturing({int intervalSeconds = 1}) async {
-    // // 先测试箭头显示功能
-    // await _testArrowDisplay();
-
-    // 然后继续正常流程
+    // 修改为手动模式：只改变状态，不启动自动截屏
     if (_isCapturing) return;
 
     final hasPermission = await requestScreenCapturePermission();
@@ -380,70 +449,8 @@ class OverlayService {
       'timestamp': DateTime.now().millisecondsSinceEpoch
     });
 
-    await sendStatusUpdate('开始识别中...');
-    var isProcessing = false;
-    try {
-      // 使用流式截屏持续捕获
-      final stream = await screenShot2.startCapture(fps:1);
-      if (stream != null) {
-        _captureStreamSubscription = stream.listen(
-          (data) async {
-            if (data != null && _isCapturing) {
-              final now = DateTime.now();
-              // 检查是否已过间隔时间
-              if ((_lastCaptureTime == null || now.difference(_lastCaptureTime!).inSeconds >= intervalSeconds)&&(!isProcessing)) {
-                _lastCaptureTime = now; // 更新上次捕获时间
-
-                try {
-                  final capturedImage = CapturedImage.fromMap(Map<String, dynamic>.from(data));
-                  if (capturedImage.bytes != null) {
-                    isProcessing = true;
-                    debugPrint('处理截屏数据 - ${now.toIso8601String()}');
-
-                    // 判断是否需要绿幕处理
-                    Uint8List processedImageBytes = capturedImage.bytes;
-                    if (_overlayRect != null) {
-                      processedImageBytes = await _applyGreenScreenToOverlayArea(capturedImage.bytes);
-                    }
-
-                    // 保存处理后的截屏到临时文件
-                    final tempFile = await _saveScreenshotToTemp(processedImageBytes);
-                    // 打印临时文件大小
-                    final fileSize = await tempFile.length();
-                    debugPrint('临时文件大小: ${fileSize} bytes');
-                    // 上传截屏到棋盘识别服务
-                    await _recognizeBoard(tempFile);
-                    isProcessing = false;
-                  }
-                } catch (e) {
-                  debugPrint('处理截屏数据失败: $e');
-                }
-              } else {
-                // 跳过这一帧，因为还没到处理间隔
-                debugPrint('跳过帧 - 距离上次处理: ${now.difference(_lastCaptureTime!).inSeconds}秒');
-              }
-            }
-          },
-          onError: (e) {
-            debugPrint('截屏流出错: $e');
-            showError('截屏出错: $e');
-          },
-          onDone: () {
-            debugPrint('截屏流结束');
-            if (_isCapturing) {
-              // 如果仍然处于捕获状态，但流结束了，尝试重新启动
-              startCapturing(intervalSeconds: intervalSeconds);
-            }
-          },
-        );
-      } else {
-        await showError('无法启动截屏流');
-        _isCapturing = false;
-      }
-    } catch (e) {
-      await showError('启动截屏出错: $e');
-      _isCapturing = false;
-    }
+    await sendStatusUpdate('手动模式已启用，点击提示按钮进行截屏分析');
+    print('手动模式已启用，等待用户点击提示按钮');
   }
 
   Future<void> stopCapturing() async {

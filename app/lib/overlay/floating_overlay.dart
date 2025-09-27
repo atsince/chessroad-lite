@@ -1088,10 +1088,10 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
                             color: Colors.transparent,
                             child: InkWell(
                               onTap: () {
-                                print("引擎提示请求已发送到服务层");
-                                // 使用消息通知服务层请求引擎提示
+                                print("手动截屏分析请求已发送到服务层");
+                                // 使用消息通知服务层进行手动截屏+识别+分析
                                 _sendMessageToMain({
-                                  'type': 'request_engine_hint',
+                                  'type': 'request_screenshot',
                                   'timestamp':
                                       DateTime.now().millisecondsSinceEpoch
                                 });
