@@ -246,6 +246,10 @@ class MainMenuState extends State<MainMenu>
           // 悬浮窗请求手动截屏，服务层会统一处理
           break;
 
+        case OverlayConstants.TYPE_MANUAL_CAPTURE_STATE:
+          // 主节目前无需处理手动截屏进度通知
+          break;
+
         case OverlayConstants.TYPE_OVERLAY_POSITION:
         case OverlayConstants.TYPE_TOGGLE_BOARD_FLIP:
           // 暂时无需在主菜单中额外处理，避免误报未知类型

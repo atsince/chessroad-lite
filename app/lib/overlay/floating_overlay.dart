@@ -32,6 +32,7 @@ class FloatingOverlay extends StatefulWidget {
 class _FloatingOverlayState extends State<FloatingOverlay> {
   String _currentPlayer = 'red'; // 'red' or 'black'
   bool _isCapturing = false;
+  bool _isManualCaptureRunning = false;
   // String _boardFen = 'rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1';
   String _boardFen = '4k4/4a4/2P1ba3/2p4r1/3P2R2/9/9/4B4/4A4/2BAK4 w - - 0 1';
   // String _boardFen = '9/9/9/6p1p/9/9/9/9/9/9 w - - 0 1';
@@ -243,10 +244,20 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
 
         case 'engine_thinking_state_changed':
           if (data.containsKey('isThinking')) {
+            final bool thinking = data['isThinking'];
             setState(() {
-              _isEngineThinking = data['isThinking'];
+              _isEngineThinking = thinking;
+              if (!thinking) {
+                _isManualCaptureRunning = false;
+              }
             });
           }
+          break;
+
+        case OverlayConstants.TYPE_MANUAL_CAPTURE_STATE:
+          setState(() {
+            _isManualCaptureRunning = data['inProgress'] == true;
+          });
           break;
 
         case 'engine_move_updated':
@@ -319,6 +330,7 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
               '引擎分析完成: ${data['chineseMove'] ?? data['bestMove'] ?? data['message'] ?? "无结果"}');
           setState(() {
             _isEngineThinking = false;
+            _isManualCaptureRunning = false;
             if (data.containsKey('chineseMove')) {
               _engineHint = data['chineseMove'];
             } else if (data.containsKey('bestMove')) {
@@ -350,6 +362,7 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
           // 处理引擎分析失败
           setState(() {
             _isEngineThinking = false;
+            _isManualCaptureRunning = false;
             _engineHint = data['message'] ?? "引擎分析失败";
           });
           break;
@@ -484,6 +497,8 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
         if (data.containsKey('message')) {
           setState(() {
             _statusMessage = '错误: ${data['message']}';
+            _isManualCaptureRunning = false;
+            _isEngineThinking = false;
           });
         }
         break;
@@ -875,6 +890,14 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
 
   // 发送截图请求到主应用
   Future<void> _requestScreenshot() async {
+    if (_isManualCaptureRunning || _isEngineThinking) {
+      return;
+    }
+
+    setState(() {
+      _isManualCaptureRunning = true;
+    });
+
     await _sendMessageToMain({
       'type': 'request_screenshot',
       'timestamp': DateTime.now().millisecondsSinceEpoch
@@ -885,6 +908,7 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
   Widget build(BuildContext context) {
     // 在build开始时准备引擎走法数据，而不是在构建过程中更新
     _prepareEngineMoves();
+    final bool isBusy = _isManualCaptureRunning || _isEngineThinking;
 
     return ChangeNotifierProvider.value(
       value: _boardState,
@@ -957,7 +981,7 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
                                               ),
                                             )
                                           : Text(
-                                              _isEngineThinking ? '思考中...' : '',
+                                              isBusy ? '思考中...' : '',
                                               style: TextStyle(
                                                 fontSize:
                                                     13 * _currentScale, // 减小字体
@@ -1087,15 +1111,19 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
                           Material(
                             color: Colors.transparent,
                             child: InkWell(
-                              onTap: () {
-                                print("手动截屏分析请求已发送到服务层");
-                                // 使用消息通知服务层进行手动截屏+识别+分析
-                                _sendMessageToMain({
-                                  'type': 'request_screenshot',
-                                  'timestamp':
-                                      DateTime.now().millisecondsSinceEpoch
-                                });
-                              },
+                              onTap: isBusy
+                                  ? null
+                                  : () async {
+                                      setState(() {
+                                        _isManualCaptureRunning = true;
+                                      });
+                                      print("手动截屏分析请求已发送到服务层");
+                                      await _sendMessageToMain({
+                                        'type': 'request_screenshot',
+                                        'timestamp':
+                                            DateTime.now().millisecondsSinceEpoch
+                                      });
+                                    },
                               borderRadius:
                                   BorderRadius.circular(4 * _currentScale),
                               child: Container(
@@ -1108,7 +1136,7 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
                                   borderRadius:
                                       BorderRadius.circular(4 * _currentScale),
                                 ),
-                                child: _isEngineThinking
+                                child: isBusy
                                     ? Row(
                                         mainAxisSize: MainAxisSize.min,
                                         children: [

@@ -43,6 +43,7 @@ class OverlayConstants {
   static const String TYPE_STATUS = 'status';
   static const String TYPE_ERROR = 'error';
   static const String TYPE_TOGGLE_CAPTURE = 'toggle_capture';
+  static const String TYPE_MANUAL_CAPTURE_STATE = 'manual_capture_state';
   static const String TYPE_OVERLAY_POSITION = 'overlay_position'; // 添加悬浮窗位置类型
   static const String TYPE_TOGGLE_BOARD_FLIP = 'toggle_board_flip'; // 添加棋盘翻转类型
 }
@@ -54,6 +55,7 @@ class OverlayService {
 
   bool _isOverlayActive = false;
   bool _isCapturing = false;
+  bool _isManualCaptureInProgress = false;
   // String _apiUrl = "http://49.233.44.201:39009/api/chess/detect";
   String _apiUrl = "http://192.168.109.201:39008/api/chess/detect";
   var screenShot2 = MediaProjectionScreenshot();
@@ -258,6 +260,13 @@ class OverlayService {
 
       case 'request_screenshot':
         // 处理手动截屏+识别+分析请求
+        if (_isManualCaptureInProgress) {
+          print('收到手动截屏请求，但上一轮仍在处理中');
+          sendStatusUpdate('正在处理上一张截图，请稍候...');
+          _notifyManualCaptureState(true);
+          break;
+        }
+
         if (_isCapturing) {
           // 只有在手动模式启用时才执行
           print('收到手动截屏请求，开始执行截屏+识别+分析');
@@ -265,6 +274,7 @@ class OverlayService {
         } else {
           print('手动模式未启用，请先点击开始按钮');
           sendStatusUpdate('请先点击开始按钮启用手动模式');
+          _notifyManualCaptureState(false);
         }
         break;
 
@@ -293,13 +303,24 @@ class OverlayService {
 
   // 专门用于手动模式的截屏方法
   Future<void> manualCapture() async {
-    final hasPermission = await requestScreenCapturePermission();
-    if (!hasPermission) {
-      await showError('无法获取截屏权限');
+    if (_isManualCaptureInProgress) {
+      debugPrint('手动截屏仍在处理中，忽略新的请求');
       return;
     }
 
+    _isManualCaptureInProgress = true;
+    _notifyManualCaptureState(true);
+
+    bool captureAttempted = false;
+
     try {
+      final hasPermission = await requestScreenCapturePermission();
+      if (!hasPermission) {
+        await showError('无法获取截屏权限');
+        return;
+      }
+
+      captureAttempted = true;
       await sendStatusUpdate('开始手动截屏识别...');
 
       // 简化截屏方法，直接获取数据
@@ -355,8 +376,13 @@ class OverlayService {
       debugPrint('堆栈跟踪: $stackTrace');
       await showError('手动截图出错: $e');
     } finally {
-      await sendStatusUpdate('手动截屏识别完成');
+      _isManualCaptureInProgress = false;
+      _notifyManualCaptureState(false);
+      if (captureAttempted) {
+        await sendStatusUpdate('手动截屏识别完成');
+      }
     }
+
   }
 
   // 用于定时截图的Timer
@@ -1141,6 +1167,16 @@ class OverlayService {
         'timestamp': DateTime.now().millisecondsSinceEpoch
       });
     }
+  }
+
+  void _notifyManualCaptureState(bool inProgress) {
+    final data = {
+      'type': OverlayConstants.TYPE_MANUAL_CAPTURE_STATE,
+      'inProgress': inProgress,
+      'timestamp': DateTime.now().millisecondsSinceEpoch
+    };
+    _dataController.add(data);
+    _sendMessageToOverlay(data);
   }
 
   // 通知悬浮窗引擎提示已更新
