@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:math';
+import 'dart:io';
 // import 'package:chessroad/engine/pikafish_engine.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
@@ -8,13 +9,12 @@ import 'package:provider/provider.dart';
 import 'dart:async';
 import 'dart:isolate';
 import 'dart:ui';
-import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:date_format/date_format.dart';
 import '../game/game.dart';
 import '../game/board_state.dart';
 import '../ui/build_utils.dart';
-import '../ui/ruler.dart';
-import '../cchess/cc_fen.dart';
-import '../cchess/move_name.dart';
 // import '../engine/engine.dart';
 import '../cchess/cc_base.dart';
 import '../config/local_data.dart';
@@ -75,6 +75,12 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
 
   // 添加棋盘翻转状态变量
   bool _isBoardFlipped = false;
+
+  // 添加相机和保存功能相关变量
+  final ImagePicker _picker = ImagePicker();
+  bool _isCameraCapturing = false;
+  bool _isSaving = false;
+  List<Map<String, dynamic>> _savedGames = [];
 
   @override
   void initState() {
@@ -904,6 +910,182 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
     });
   }
 
+  // 拍照功能实现
+  Future<void> _captureFromCamera() async {
+    if (_isCameraCapturing) return;
+
+    setState(() {
+      _isCameraCapturing = true;
+    });
+
+    try {
+      final XFile? photo = await _picker.pickImage(
+        source: ImageSource.camera,
+        imageQuality: 85,
+      );
+
+      if (photo != null) {
+        // 发送图片到主应用进行识别
+        final bytes = await photo.readAsBytes();
+
+        // 通知主应用处理相机拍照的图片
+        await _sendMessageToMain({
+          'type': 'camera_capture',
+          'imagePath': photo.path,
+          'timestamp': DateTime.now().millisecondsSinceEpoch,
+        });
+
+        setState(() {
+          _statusMessage = '正在识别拍照结果...';
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _statusMessage = '拍照失败: $e';
+      });
+    } finally {
+      setState(() {
+        _isCameraCapturing = false;
+      });
+    }
+  }
+
+  // 保存当前棋谱功能
+  Future<void> _saveCurrentGame() async {
+    if (_isSaving) return;
+
+    setState(() {
+      _isSaving = true;
+    });
+
+    try {
+      final title = formatDate(
+        DateTime.now(),
+        [yyyy, '-', mm, '-', dd, '_', HH, ':', nn, ':', ss],
+      );
+
+      // 构建棋谱数据
+      final gameData = {
+        'id': DateTime.now().millisecondsSinceEpoch.toString(),
+        'title': title,
+        'fen': _boardFen,
+        'player': _currentPlayer,
+        'date': DateTime.now().toIso8601String(),
+        'engineHint': _engineHint,
+        'flipped': _isBoardFlipped,
+      };
+
+      // 获取文档目录
+      final appDocDir = await getApplicationDocumentsDirectory();
+      final saveDir = Directory('${appDocDir.path}/overlay_saved');
+      if (!await saveDir.exists()) {
+        await saveDir.create(recursive: true);
+      }
+
+      // 保存到文件
+      final file = File('${saveDir.path}/$title.json');
+      await file.writeAsString(jsonEncode(gameData));
+
+      // 更新保存列表
+      _savedGames.insert(0, gameData);
+
+      setState(() {
+        _statusMessage = '棋谱已保存';
+      });
+
+      // 通知主应用
+      await _sendMessageToMain({
+        'type': 'game_saved',
+        'title': title,
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+      });
+    } catch (e) {
+      setState(() {
+        _statusMessage = '保存失败: $e';
+      });
+    } finally {
+      setState(() {
+        _isSaving = false;
+      });
+    }
+  }
+
+  // 加载已保存的棋谱
+  Future<void> _loadSavedGames() async {
+    try {
+      final appDocDir = await getApplicationDocumentsDirectory();
+      final saveDir = Directory('${appDocDir.path}/overlay_saved');
+
+      if (await saveDir.exists()) {
+        final entities = await saveDir.list().toList();
+        final games = <Map<String, dynamic>>[];
+
+        for (var entity in entities) {
+          if (entity is File && entity.path.endsWith('.json')) {
+            final content = await entity.readAsString();
+            games.add(jsonDecode(content));
+          }
+        }
+
+        games.sort((a, b) => b['date'].compareTo(a['date']));
+        setState(() {
+          _savedGames = games;
+        });
+      }
+    } catch (e) {
+      print('加载保存的棋谱失败: $e');
+    }
+  }
+
+  // 显示已保存的棋谱列表
+  Future<void> _showSavedGames() async {
+    await _loadSavedGames();
+
+    if (!mounted) return;
+
+    await showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text('已保存的棋谱'),
+          content: Container(
+            width: double.maxFinite,
+            height: 300,
+            child: _savedGames.isEmpty
+                ? Center(child: Text('暂无保存的棋谱'))
+                : ListView.builder(
+                    itemCount: _savedGames.length,
+                    itemBuilder: (context, index) {
+                      final game = _savedGames[index];
+                      return ListTile(
+                        title: Text(game['title']),
+                        subtitle: Text('${game['player'] == 'red' ? '红方' : '黑方'}走棋'),
+                        onTap: () {
+                          // 加载这个棋谱
+                          setState(() {
+                            _boardFen = game['fen'];
+                            _currentPlayer = game['player'];
+                            _boardState.load(_boardFen, notify: true);
+                          });
+                          Navigator.of(context).pop();
+                        },
+                      );
+                    },
+                  ),
+          ),
+          actions: [
+            TextButton(
+              child: Text('关闭'),
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     // 在build开始时准备引擎走法数据，而不是在构建过程中更新
@@ -1020,94 +1202,95 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
                     ),
                   ),
 
-                  // 操作按钮
-                  Column(
+                  // 操作按钮 - 两列布局
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // 切换红黑方按钮
-                      GestureDetector(
-                        onTap: _togglePlayer,
-                        child: Container(
-                          padding:
-                              EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                          decoration: BoxDecoration(
-                            color: Colors.green,
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: Text(
-                            _currentPlayer == 'red' ? '红走' : '黑走',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 12 * _currentScale,
-                            ),
-                          ),
-                        ),
-                      ),
-                      SizedBox(height: 4 * _currentScale),
-                      // 开始/停止按钮
-                      GestureDetector(
-                        onTap: _toggleCapturing,
-                        child: Container(
-                          padding:
-                              EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                          decoration: BoxDecoration(
-                            color: Colors.green,
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: Text(
-                            _isCapturing ? '停止' : '开始',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 12 * _currentScale,
-                            ),
-                          ),
-                        ),
-                      ),
-                      SizedBox(height: 4 * _currentScale),
-
-                      GestureDetector(
-                        onTap: _toggleBoardFlip,
-                        child: Container(
-                          padding:
-                              EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                          decoration: BoxDecoration(
-                            color: Colors.green,
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: Text(
-                            '翻转',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 12 * _currentScale,
-                            ),
-                          ),
-                        ),
-                      ),
-                      SizedBox(height: 4 * _currentScale),
-                      // 关闭按钮
-                      GestureDetector(
-                        onTap: _closeOverlay,
-                        child: Container(
-                          padding:
-                              EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                          decoration: BoxDecoration(
-                            color: Colors.green,
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: Text(
-                            '关闭',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 12 * _currentScale,
-                            ),
-                          ),
-                        ),
-                      ),
-                      SizedBox(height: 4 * _currentScale),
-                      // 右侧：控制按钮
-                      Row(
+                      // 第一列：基础控制按钮
+                      Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          // 提示按钮
+                          // 切换红黑方按钮
+                          GestureDetector(
+                            onTap: _togglePlayer,
+                            child: Container(
+                              padding:
+                                  EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                              decoration: BoxDecoration(
+                                color: Colors.green,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                _currentPlayer == 'red' ? '红走' : '黑走',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12 * _currentScale,
+                                ),
+                              ),
+                            ),
+                          ),
+                          SizedBox(height: 4 * _currentScale),
+                          // 开始/停止按钮
+                          GestureDetector(
+                            onTap: _toggleCapturing,
+                            child: Container(
+                              padding:
+                                  EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                              decoration: BoxDecoration(
+                                color: Colors.green,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                _isCapturing ? '停止' : '开始',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12 * _currentScale,
+                                ),
+                              ),
+                            ),
+                          ),
+                          SizedBox(height: 4 * _currentScale),
+                          // 翻转按钮
+                          GestureDetector(
+                            onTap: _toggleBoardFlip,
+                            child: Container(
+                              padding:
+                                  EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                              decoration: BoxDecoration(
+                                color: Colors.green,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                '翻转',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12 * _currentScale,
+                                ),
+                              ),
+                            ),
+                          ),
+                          SizedBox(height: 4 * _currentScale),
+                          // 关闭按钮
+                          GestureDetector(
+                            onTap: _closeOverlay,
+                            child: Container(
+                              padding:
+                                  EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                              decoration: BoxDecoration(
+                                color: Colors.green,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                '关闭',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12 * _currentScale,
+                                ),
+                              ),
+                            ),
+                          ),
+                          SizedBox(height: 8 * _currentScale),
+                          // 提示按钮 - 双倍高度，蓝色
                           Material(
                             color: Colors.transparent,
                             child: InkWell(
@@ -1127,6 +1310,8 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
                               borderRadius:
                                   BorderRadius.circular(4 * _currentScale),
                               child: Container(
+                                width: 60 * _currentScale,
+                                height: 52 * _currentScale, // 双倍高度
                                 padding: EdgeInsets.symmetric(
                                   horizontal: 6 * _currentScale,
                                   vertical: 6 * _currentScale,
@@ -1136,92 +1321,121 @@ class _FloatingOverlayState extends State<FloatingOverlay> {
                                   borderRadius:
                                       BorderRadius.circular(4 * _currentScale),
                                 ),
-                                child: isBusy
-                                    ? Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          SizedBox(
-                                            width:
-                                                10 * _currentScale, // 从12减小到10
-                                            height:
-                                                10 * _currentScale, // 从12减小到10
-                                            child: CircularProgressIndicator(
-                                              strokeWidth: 1.5 *
-                                                  _currentScale, // 从2减小到1.5
+                                child: Center(
+                                  child: isBusy
+                                      ? Column(
+                                          mainAxisSize: MainAxisSize.min,
+                                          mainAxisAlignment: MainAxisAlignment.center,
+                                          children: [
+                                            SizedBox(
+                                              width: 14 * _currentScale,
+                                              height: 14 * _currentScale,
+                                              child: CircularProgressIndicator(
+                                                strokeWidth: 1.5 * _currentScale,
+                                                color: Colors.white,
+                                              ),
+                                            ),
+                                            SizedBox(height: 3 * _currentScale),
+                                            Text(
+                                              '思考中',
+                                              style: TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 10 * _currentScale,
+                                              ),
+                                            ),
+                                          ],
+                                        )
+                                      : Column(
+                                          mainAxisSize: MainAxisSize.min,
+                                          mainAxisAlignment: MainAxisAlignment.center,
+                                          children: [
+                                            Icon(
+                                              Icons.lightbulb_outline,
+                                              size: 18 * _currentScale,
                                               color: Colors.white,
                                             ),
-                                          ),
-                                          SizedBox(
-                                              width:
-                                                  3 * _currentScale), // 从4减小到3
-                                          Text(
-                                            '思考中',
-                                            style: TextStyle(
-                                              color: Colors.white,
-                                              fontSize: 11 *
-                                                  _currentScale, // 从12减小到11
+                                            SizedBox(height: 2 * _currentScale),
+                                            Text(
+                                              '提示',
+                                              style: TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 12 * _currentScale,
+                                                fontWeight: FontWeight.bold,
+                                              ),
                                             ),
-                                          ),
-                                        ],
-                                      )
-                                    : Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Icon(
-                                            Icons.flash_on,
-                                            size:
-                                                12 * _currentScale, // 从14减小到12
-                                            color: Colors.white,
-                                          ),
-                                          SizedBox(width: 2 * _currentScale),
-                                          Text(
-                                            '提示', // 简化文字
-                                            style: TextStyle(
-                                              color: Colors.white,
-                                              fontSize: 11 *
-                                                  _currentScale, // 从12减小到11
-                                            ),
-                                          ),
-                                        ],
-                                      ),
+                                          ],
+                                        ),
+                                ),
                               ),
                             ),
                           ),
                         ],
                       ),
-
-                      // 添加拍照按钮
-                      SizedBox(height: 8 * _currentScale),
-                      GestureDetector(
-                        onTap: _requestScreenshot,
-                        child: Container(
-                          padding: EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 5
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.green,
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                Icons.camera_alt,
-                                size: 12 * _currentScale,
-                                color: Colors.white,
+                      SizedBox(width: 4 * _currentScale),
+                      // 第二列：拍照、保存、查看功能
+                      Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          // 拍照按钮
+                          GestureDetector(
+                            onTap: _captureFromCamera,
+                            child: Container(
+                              padding:
+                                  EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                              decoration: BoxDecoration(
+                                color: Colors.green,
+                                borderRadius: BorderRadius.circular(4),
                               ),
-                              SizedBox(width: 4 * _currentScale),
-                              Text(
+                              child: Text(
                                 '拍照',
                                 style: TextStyle(
                                   color: Colors.white,
                                   fontSize: 12 * _currentScale,
                                 ),
                               ),
-                            ],
+                            ),
                           ),
-                        ),
+                          SizedBox(height: 4 * _currentScale),
+                          // 保存按钮
+                          GestureDetector(
+                            onTap: _saveCurrentGame,
+                            child: Container(
+                              padding:
+                                  EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                              decoration: BoxDecoration(
+                                color: Colors.green,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                '保存',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12 * _currentScale,
+                                ),
+                              ),
+                            ),
+                          ),
+                          SizedBox(height: 4 * _currentScale),
+                          // 查看按钮
+                          GestureDetector(
+                            onTap: _showSavedGames,
+                            child: Container(
+                              padding:
+                                  EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                              decoration: BoxDecoration(
+                                color: Colors.green,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                '查看',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12 * _currentScale,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),

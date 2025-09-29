@@ -278,6 +278,21 @@ class OverlayService {
         }
         break;
 
+      case 'camera_capture':
+        // 处理相机拍照的图片识别
+        if (data.containsKey('imagePath')) {
+          print('收到相机拍照图片，开始识别...');
+          _processCameraImage(data['imagePath']);
+        }
+        break;
+
+      case 'game_saved':
+        // 处理棋谱保存通知
+        if (data.containsKey('title')) {
+          print('棋谱已保存: ${data['title']}');
+        }
+        break;
+
       // 其他消息类型的处理...
     }
   }
@@ -287,6 +302,70 @@ class OverlayService {
     // 创建一个表示悬浮窗区域的Rect
     _overlayRect = Rect.fromLTWH(x, y, width, height);
     print('更新悬浮窗位置: $_overlayRect');
+  }
+
+  // 处理相机拍照的图片
+  Future<void> _processCameraImage(String imagePath) async {
+    try {
+      sendStatusUpdate('正在识别拍照的棋盘...');
+
+      final file = File(imagePath);
+      if (!await file.exists()) {
+        await showError('图片文件不存在');
+        return;
+      }
+
+      // 上传图片到棋盘识别服务
+      await _recognizeBoardFromFile(file);
+
+    } catch (e) {
+      print('处理相机图片失败: $e');
+      await showError('处理拍照图片失败: $e');
+    }
+  }
+
+  // 从文件识别棋盘
+  Future<void> _recognizeBoardFromFile(File file) async {
+    try {
+      final request = http.MultipartRequest('POST', Uri.parse(_apiUrl));
+      request.files.add(
+        await http.MultipartFile.fromPath('image', file.path)
+      );
+
+      final response = await request.send();
+
+      if (response.statusCode == 200) {
+        final responseData = await response.stream.bytesToString();
+        final jsonData = jsonDecode(responseData);
+
+        if (jsonData['success'] == true) {
+          final fen = jsonData['fen'] ?? '';
+          final player = jsonData['player'] ?? 'red';
+
+          // 更新棋盘状态
+          setCurrentPosition(fen, player);
+
+          // 通知悬浮窗更新显示
+          _sendMessageToOverlay({
+            'command': OverlayConstants.CMD_UPDATE_BOARD,
+            'fen': fen,
+            'player': player,
+            'timestamp': DateTime.now().millisecondsSinceEpoch,
+          });
+
+          // 请求引擎分析
+          requestEngineHint(fen);
+
+        } else {
+          await showError('棋盘识别失败: ${jsonData['error'] ?? '未知错误'}');
+        }
+      } else {
+        await showError('识别服务器响应错误: ${response.statusCode}');
+      }
+    } catch (e) {
+      print('识别棋盘失败: $e');
+      await showError('识别棋盘失败: $e');
+    }
   }
 
   // 屏幕捕获相关方法
